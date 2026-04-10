@@ -5851,6 +5851,32 @@ struct PTOExtractToEmitC : public OpConversionPattern<pto::TExtractOp> {
   }
 };
 //===----------------------------------------------------------------------===//
+// pto.textract_fp lowering -> TEXTRACT_FP(dst, src, fp, indexRow, indexCol)
+//===----------------------------------------------------------------------===//
+
+struct PTOExtractFPToEmitC : public OpConversionPattern<pto::TExtractFPOp> {
+  using OpConversionPattern<pto::TExtractFPOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TExtractFPOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value fp = peelUnrealized(adaptor.getFp());
+    Value dst = peelUnrealized(adaptor.getDst());
+    Value r0 = peelUnrealized(adaptor.getIndexRow());
+    Value c0 = peelUnrealized(adaptor.getIndexCol());
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "TEXTRACT_FP",
+        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+        /*operands=*/ValueRange{dst, src, fp, r0, c0});
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+//===----------------------------------------------------------------------===//
 // pto.tinsert lowering -> TINSERT(dst, src, indexRow, indexCol)
 // Keep lowering arch-agnostic and let PTO-ISA infer proper A5 path.
 //===----------------------------------------------------------------------===//
@@ -5877,6 +5903,32 @@ struct PTOInsertToEmitC : public OpConversionPattern<pto::TInsertOp> {
   }
 };
 //===----------------------------------------------------------------------===//
+// pto.tinsert_fp lowering -> TINSERT_FP(dst, src, fp, indexRow, indexCol)
+//===----------------------------------------------------------------------===//
+
+struct PTOInsertFPToEmitC : public OpConversionPattern<pto::TInsertFPOp> {
+  using OpConversionPattern<pto::TInsertFPOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TInsertFPOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value fp = peelUnrealized(adaptor.getFp());
+    Value dst = peelUnrealized(adaptor.getDst());
+    Value r0 = peelUnrealized(adaptor.getIndexRow());
+    Value c0 = peelUnrealized(adaptor.getIndexCol());
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "TINSERT_FP",
+        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+        /*operands=*/ValueRange{dst, src, fp, r0, c0});
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+//===----------------------------------------------------------------------===//
 // pto.tfillpad lowering -> TFILLPAD(dst, src)
 //===----------------------------------------------------------------------===//
 
@@ -5889,9 +5941,12 @@ struct PTOFillPadToEmitC : public OpConversionPattern<pto::TFillPadOp> {
 
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst = peelUnrealized(adaptor.getDst());
+    llvm::StringRef callee =
+        (op.getSrc() == op.getDst() || src == dst) ? "TFILLPAD_INPLACE"
+                                                   : "TFILLPAD";
 
     rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TFILLPAD",
+        loc, TypeRange{}, callee,
         /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
         /*operands=*/ValueRange{dst, src});
 
@@ -6635,6 +6690,31 @@ struct PTOPartMinToEmitC : public OpConversionPattern<pto::TPartMinOp> {
     SmallVector<Value, 3> operands{dst, src0, src1};
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TPARTMIN",
+        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+        /*operands=*/operands);
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+//===----------------------------------------------------------------------===//
+// PTOConvert.cpp  (add lowering + patterns.add for TPARTMUL DPS/memref op)
+//===----------------------------------------------------------------------===//
+
+struct PTOPartMulToEmitC : public OpConversionPattern<pto::TPartMulOp> {
+  using OpConversionPattern<pto::TPartMulOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TPartMulOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+
+    Value src0 = peelUnrealized(adaptor.getSrc0());
+    Value src1 = peelUnrealized(adaptor.getSrc1());
+    Value dst  = peelUnrealized(adaptor.getDst());
+
+    SmallVector<Value, 3> operands{dst, src0, src1};
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "TPARTMUL",
         /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
         /*operands=*/operands);
 
@@ -8625,10 +8705,12 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTOPartMaxToEmitC>(typeConverter, ctx);
   patterns.add<PTONotToEmitC>(typeConverter, ctx);
   patterns.add<PTOPartMinToEmitC>(typeConverter, ctx);
+  patterns.add<PTOPartMulToEmitC>(typeConverter, ctx);
   patterns.add<PTOExpandsToEmitC>(typeConverter, ctx);
   patterns.add<PTOOrToEmitC>(typeConverter, ctx);
   patterns.add<PTOPartAddToEmitC>(typeConverter, ctx);
-  patterns.add<PTOExtractToEmitC, PTOInsertToEmitC>(typeConverter, ctx);
+  patterns.add<PTOExtractToEmitC, PTOExtractFPToEmitC, PTOInsertToEmitC,
+               PTOInsertFPToEmitC>(typeConverter, ctx);
   patterns.add<PTOFillPadToEmitC, PTOFillPadExpandToEmitC>(typeConverter, ctx);
   patterns.add<PTOGatherToEmitC>(typeConverter, ctx);
   patterns.add<PTOGatherbToEmitC>(typeConverter, ctx);

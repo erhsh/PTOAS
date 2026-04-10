@@ -2311,13 +2311,15 @@ struct PTOViewToMemrefPass
           scalarOperand = src;
         }
 
-        auto newOp = rewriter.replaceOpWithNewOp<pto::TDivSOp>(
-            op,
+        auto attrs = op->getAttrs();
+        auto newOp = rewriter.create<pto::TDivSOp>(
+            op.getLoc(),
             TypeRange{},
             memrefOperand,
             scalarOperand,
             dst);
-        newOp->setAttrs(op->getAttrs());
+        newOp->setAttrs(attrs);
+        rewriter.replaceOp(op, newOp->getResults());
       }
 
       SmallVector<mlir::pto::TExpandsOp, 8> expandsops;
@@ -2980,6 +2982,33 @@ struct PTOViewToMemrefPass
         }
 
         rewriter.replaceOpWithNewOp<pto::TPartAddOp>(
+            op,
+            src0,
+            src1,
+            dst);
+      }
+
+      SmallVector<mlir::pto::TPartMulOp, 8> partmulops;
+      func.walk([&](mlir::pto::TPartMulOp op) { partmulops.push_back(op); });
+
+      for (auto op : partmulops) {
+        IRRewriter rewriter(ctx);
+        rewriter.setInsertionPoint(op);
+
+        Value src0 = op.getSrc0();
+        Value src1 = op.getSrc1();
+        Value dst = op.getDst();
+
+        auto src0Ty = dyn_cast<MemRefType>(src0.getType());
+        auto src1Ty = dyn_cast<MemRefType>(src1.getType());
+        auto dstTy = dyn_cast<MemRefType>(dst.getType());
+        if (!src0Ty || !src1Ty || !dstTy) {
+          op.emitError("ins/outs are not memref yet");
+          signalPassFailure();
+          return;
+        }
+
+        rewriter.replaceOpWithNewOp<pto::TPartMulOp>(
             op,
             src0,
             src1,
