@@ -30,6 +30,7 @@ from .semantic import (
     SemanticReturnStmt,
     SemanticScalarType,
     SemanticSetFlagStmt,
+    SemanticShapeType,
     SemanticStmt,
     SemanticVecscopeStmt,
     SemanticStrictVecscopeStmt,
@@ -264,7 +265,7 @@ class _AuthoringRenderer:
                     self._collect_used_tile_buffers_from_expr(slice_expr.step, used)
             return
         if isinstance(expr, SemanticAttributeAccess):
-            if expr.attr not in {"shape", "valid_shape", "element_type"}:
+            if expr.attr not in {"shape", "valid_shape", "strides", "element_type"}:
                 self._collect_used_tile_buffers_from_expr(expr.base, used)
             return
         if isinstance(expr, SemanticSubscriptAccess):
@@ -395,7 +396,10 @@ class _AuthoringRenderer:
         indent: int,
     ) -> list[str]:
         if len(stmt.targets) != 1:
-            if isinstance(stmt.value, SemanticTupleExpr):
+            if isinstance(stmt.value, SemanticTupleExpr) or (
+                isinstance(stmt.value, SemanticAttributeAccess)
+                and isinstance(stmt.value.type, SemanticShapeType)
+            ):
                 return self._render_tuple_expr_assign(stmt, env, indent=indent)
             return self._render_multi_result_assign(stmt, env, indent=indent)
         target = stmt.targets[0]
@@ -420,13 +424,26 @@ class _AuthoringRenderer:
         *,
         indent: int,
     ) -> list[str]:
-        if not isinstance(stmt.value, SemanticTupleExpr):
-            raise NotImplementedError("tuple expression assignment expects a SemanticTupleExpr")
-        if len(stmt.targets) != len(stmt.value.elements):
+        if isinstance(stmt.value, SemanticTupleExpr):
+            elements = stmt.value.elements
+        elif isinstance(stmt.value, SemanticAttributeAccess) and isinstance(stmt.value.type, SemanticShapeType):
+            elements = tuple(
+                SemanticSubscriptAccess(
+                    base=stmt.value,
+                    index=SemanticLiteralExpr(value=axis, type=SemanticIndexType()),
+                    type=SemanticIndexType(),
+                )
+                for axis in range(stmt.value.type.rank)
+            )
+        else:
+            raise NotImplementedError(
+                "tuple expression assignment expects a SemanticTupleExpr or shape-like attribute value"
+            )
+        if len(stmt.targets) != len(elements):
             raise NotImplementedError("tuple expression assignment arity mismatch")
 
         lines: list[str] = []
-        for target, element in zip(stmt.targets, stmt.value.elements):
+        for target, element in zip(stmt.targets, elements):
             lowered = self._lower_expr(
                 element,
                 env,
@@ -522,6 +539,24 @@ class _AuthoringRenderer:
                 self._indent(indent)
                 + f"{low_target.ssa_name}, {high_target.ssa_name} = pto.{stmt.value.name} "
                 + f"{lhs.name}, {rhs.name} : {self._render_type(lhs.type)}, {self._render_type(rhs.type)} "
+                + f"-> {self._render_type(low_type)}, {self._render_type(high_type)}"
+            )
+            env[low_target.name] = _RenderedValue(name=low_target.ssa_name, type=low_type)
+            env[high_target.name] = _RenderedValue(name=high_target.ssa_name, type=high_type)
+            return lines
+
+        if stmt.value.name == "vmull":
+            lines = []
+            lhs = self._lower_expr(stmt.value.args[0], env, indent=indent, into=lines)
+            rhs = self._lower_expr(stmt.value.args[1], env, indent=indent, into=lines)
+            mask = self._lower_expr(stmt.value.args[2], env, indent=indent, into=lines)
+            low_target, high_target = stmt.targets
+            low_type, high_type = stmt.value.type.elements
+            lines.append(
+                self._indent(indent)
+                + f"{low_target.ssa_name}, {high_target.ssa_name} = pto.vmull "
+                + f"{lhs.name}, {rhs.name}, {mask.name} : "
+                + f"{self._render_type(lhs.type)}, {self._render_type(rhs.type)}, {self._render_type(mask.type)} "
                 + f"-> {self._render_type(low_type)}, {self._render_type(high_type)}"
             )
             env[low_target.name] = _RenderedValue(name=low_target.ssa_name, type=low_type)
@@ -775,6 +810,7 @@ class _AuthoringRenderer:
         row_count = self._materialize_dma_axis_extent(slice_expr, 0, env, indent=indent, into=into)
         col_count = self._materialize_dma_axis_extent(slice_expr, 1, env, indent=indent, into=into)
         gm_row_stride = self._materialize_tensor_row_stride_bytes(
+            slice_expr,
             tensor_base,
             element_bytes,
             indent=indent,
@@ -846,6 +882,7 @@ class _AuthoringRenderer:
             into=into,
         )
         gm_row_stride = self._materialize_tensor_row_stride_bytes(
+            slice_expr,
             tensor_base,
             element_bytes,
             indent=indent,
@@ -1269,30 +1306,34 @@ class _AuthoringRenderer:
         indent: int,
         into: list[str],
     ) -> _RenderedValue:
-        row_start = self._lower_expr(slice_expr.slices[0].start, env, indent=indent, into=into)
-        col_start = self._lower_expr(slice_expr.slices[1].start, env, indent=indent, into=into)
-        row_stride_elems = self._materialize_tensor_dim(
-            tensor_base,
-            axis=1,
-            indent=indent,
-            into=into,
+        offset_elems = _RenderedValue(
+            name=self._materialize_constant(0, SemanticIndexType()),
+            type=SemanticIndexType(),
         )
-        row_offset_elems = self._emit_binary_value(
-            "mul",
-            row_start,
-            row_stride_elems,
-            SemanticIndexType(),
-            indent=indent,
-            into=into,
-        )
-        offset_elems = self._emit_binary_value(
-            "add",
-            row_offset_elems,
-            col_start,
-            SemanticIndexType(),
-            indent=indent,
-            into=into,
-        )
+        for axis_index, slice_axis in enumerate(slice_expr.slices):
+            axis_start = self._lower_expr(slice_axis.start, env, indent=indent, into=into)
+            axis_stride_elems = self._materialize_tensor_axis_stride_elems(
+                tensor_base,
+                axis=slice_expr.type.physical_axes[axis_index],
+                indent=indent,
+                into=into,
+            )
+            axis_offset_elems = self._emit_binary_value(
+                "mul",
+                axis_start,
+                axis_stride_elems,
+                SemanticIndexType(),
+                indent=indent,
+                into=into,
+            )
+            offset_elems = self._emit_binary_value(
+                "add",
+                offset_elems,
+                axis_offset_elems,
+                SemanticIndexType(),
+                indent=indent,
+                into=into,
+            )
         return self._emit_binary_value(
             "mul",
             offset_elems,
@@ -1325,10 +1366,17 @@ class _AuthoringRenderer:
     ) -> _RenderedValue:
         dim_index = self._new_temp()
         axis_value = self._materialize_constant(axis, SemanticIndexType())
-        into.append(
-            self._indent(indent)
-            + f"{dim_index} = memref.dim {tensor_base.name}, {axis_value} : {self._render_type(tensor_base.type)}"
-        )
+        if isinstance(tensor_base.type, SemanticTensorViewType):
+            into.append(
+                self._indent(indent)
+                + f"{dim_index} = pto.get_tensor_view_dim {tensor_base.name}, {axis_value} : "
+                + f"{self._render_type(tensor_base.type)} -> index"
+            )
+        else:
+            into.append(
+                self._indent(indent)
+                + f"{dim_index} = memref.dim {tensor_base.name}, {axis_value} : {self._render_type(tensor_base.type)}"
+            )
         return _RenderedValue(name=dim_index, type=SemanticIndexType())
 
     def _materialize_dma_axis_extent(
@@ -1381,23 +1429,53 @@ class _AuthoringRenderer:
     ) -> _RenderedValue:
         return self._lower_to_i64(slice_expr.slices[0].step, env, indent=indent, into=into)
 
+    def _materialize_tensor_axis_stride_elems(
+        self,
+        tensor_base: _RenderedValue,
+        axis: int,
+        *,
+        indent: int,
+        into: list[str],
+    ) -> _RenderedValue:
+        stride = _RenderedValue(
+            name=self._materialize_constant(1, SemanticIndexType()),
+            type=SemanticIndexType(),
+        )
+        for dim_axis in range(axis + 1, tensor_base.type.rank):
+            dim_value = self._materialize_tensor_dim(
+                tensor_base,
+                axis=dim_axis,
+                indent=indent,
+                into=into,
+            )
+            stride = self._emit_binary_value(
+                "mul",
+                stride,
+                dim_value,
+                SemanticIndexType(),
+                indent=indent,
+                into=into,
+            )
+        return stride
+
     def _materialize_tensor_row_stride_bytes(
         self,
+        slice_expr: SemanticTensorSliceExpr,
         tensor_base: _RenderedValue,
         element_bytes: int,
         *,
         indent: int,
         into: list[str],
     ) -> _RenderedValue:
-        dim_value = self._materialize_tensor_dim(
+        stride_elems = self._materialize_tensor_axis_stride_elems(
             tensor_base,
-            axis=1,
+            axis=slice_expr.type.physical_axes[0],
             indent=indent,
             into=into,
         )
         dim_bytes = self._emit_binary_value(
             "mul",
-            dim_value,
+            stride_elems,
             _RenderedValue(
                 name=self._materialize_constant(element_bytes, SemanticIndexType()),
                 type=SemanticIndexType(),
@@ -1555,43 +1633,102 @@ class _AuthoringRenderer:
             lines.append(self._indent(indent) + "}")
             return lines
 
-        if len(stmt.loop_carried) != 1:
-            raise NotImplementedError(
-                "TileLang DSL v1 lowering currently supports at most one loop-carried binding"
+        carried_bindings = tuple(stmt.loop_carried)
+        if len(carried_bindings) == 1:
+            carried_binding = carried_bindings[0]
+            initial_value = self._coerce_rendered_value(
+                env[carried_binding.name],
+                carried_binding.type,
+                indent=indent,
+                into=lines,
+            )
+            iter_arg_name = f"%{carried_binding.name}_iter_{self._loop_counter}"
+            self._loop_counter += 1
+            body_env[carried_binding.name] = _RenderedValue(
+                name=iter_arg_name,
+                type=carried_binding.type,
             )
 
-        carried_binding = stmt.loop_carried[0]
-        initial_value = self._coerce_rendered_value(
-            env[carried_binding.name],
-            carried_binding.type,
-            indent=indent,
-            into=lines,
-        )
-        iter_arg_name = f"%{carried_binding.name}_iter_{self._loop_counter}"
+            lines.append(
+                self._indent(indent)
+                + f"{carried_binding.ssa_name}:1 = scf.for {stmt.induction_variable.ssa_name} = "
+                f"{lower_bound.name} to {upper_bound.name} step {step.name} "
+                f"iter_args({iter_arg_name} = {initial_value.name}) -> "
+                f"({self._render_type(carried_binding.type)}) {{"
+            )
+            lines.extend(self._render_block(stmt.body, body_env, indent=indent + 2))
+            yielded_value = self._coerce_rendered_value(
+                body_env[carried_binding.name],
+                carried_binding.type,
+                indent=indent + 2,
+                into=lines,
+            )
+            lines.append(
+                self._indent(indent + 2)
+                + f"scf.yield {yielded_value.name} : {self._render_type(yielded_value.type)}"
+            )
+            lines.append(self._indent(indent) + "}")
+            env[carried_binding.name] = _RenderedValue(
+                name=carried_binding.ssa_name,
+                type=carried_binding.type,
+            )
+            return lines
+
+        loop_id = self._loop_counter
         self._loop_counter += 1
-        body_env[carried_binding.name] = _RenderedValue(
-            name=iter_arg_name,
-            type=carried_binding.type,
+
+        initial_values: list[_RenderedValue] = []
+        iter_arg_names: list[str] = []
+        for index, binding in enumerate(carried_bindings):
+            initial_values.append(
+                self._coerce_rendered_value(
+                    env[binding.name],
+                    binding.type,
+                    indent=indent,
+                    into=lines,
+                )
+            )
+            iter_arg_names.append(f"%{binding.name}_iter_{loop_id}_{index}")
+            body_env[binding.name] = _RenderedValue(
+                name=iter_arg_names[-1],
+                type=binding.type,
+            )
+
+        result_names = ", ".join(binding.ssa_name for binding in carried_bindings)
+        iter_args = ", ".join(
+            f"{iter_name} = {initial.name}"
+            for iter_name, initial in zip(iter_arg_names, initial_values)
         )
+        result_types = ", ".join(self._render_type(binding.type) for binding in carried_bindings)
 
         lines.append(
             self._indent(indent)
-            + f"{carried_binding.ssa_name}:1 = scf.for {stmt.induction_variable.ssa_name} = "
+            + f"{result_names} = scf.for {stmt.induction_variable.ssa_name} = "
             f"{lower_bound.name} to {upper_bound.name} step {step.name} "
-            f"iter_args({iter_arg_name} = {initial_value.name}) -> "
-            f"({self._render_type(carried_binding.type)}) {{"
+            f"iter_args({iter_args}) -> ({result_types}) {{"
         )
         lines.extend(self._render_block(stmt.body, body_env, indent=indent + 2))
-        yielded_value = body_env[carried_binding.name]
+        yielded_values = [
+            self._coerce_rendered_value(
+                body_env[binding.name],
+                binding.type,
+                indent=indent + 2,
+                into=lines,
+            )
+            for binding in carried_bindings
+        ]
+        yielded_names = ", ".join(value.name for value in yielded_values)
+        yielded_types = ", ".join(self._render_type(value.type) for value in yielded_values)
         lines.append(
             self._indent(indent + 2)
-            + f"scf.yield {yielded_value.name} : {self._render_type(yielded_value.type)}"
+            + f"scf.yield {yielded_names} : {yielded_types}"
         )
         lines.append(self._indent(indent) + "}")
-        env[carried_binding.name] = _RenderedValue(
-            name=carried_binding.ssa_name,
-            type=carried_binding.type,
-        )
+        for binding in carried_bindings:
+            env[binding.name] = _RenderedValue(
+                name=binding.ssa_name,
+                type=binding.type,
+            )
         return lines
 
     def _render_if(
@@ -1720,8 +1857,27 @@ class _AuthoringRenderer:
         if isinstance(expr, SemanticBinaryExpr):
             if into is None:
                 into = []
+            if expr.op in {"and", "or"}:
+                return self._lower_bool_expr(
+                    expr.op,
+                    expr.lhs,
+                    expr.rhs,
+                    env,
+                    indent=indent,
+                    desired_name=desired_name,
+                    into=into,
+                )
             lhs = self._lower_expr(expr.lhs, env, indent=indent, into=into)
             rhs = self._lower_expr(expr.rhs, env, indent=indent, into=into)
+            if expr.op in {"eq", "ne", "gt", "lt", "ge", "le"}:
+                return self._lower_compare_expr(
+                    expr.op,
+                    lhs,
+                    rhs,
+                    indent=indent,
+                    desired_name=desired_name,
+                    into=into,
+                )
             result_name = desired_name or self._new_temp()
             into.append(
                 self._indent(indent)
@@ -1777,6 +1933,53 @@ class _AuthoringRenderer:
             into.append(
                 self._indent(indent)
                 + f"{result_name} = pto.vlds {source.name}[{rendered_indices}] : "
+                + f"{self._render_type(source.type)} -> {self._render_type(expr.type)}"
+            )
+            return _RenderedValue(name=result_name, type=expr.type)
+
+        if expr.name == "vbr":
+            scalar = self._lower_expr(expr.args[0], env, indent=indent, into=into)
+            into.append(
+                self._indent(indent)
+                + f"{result_name} = pto.vbr {scalar.name} : "
+                + f"{self._render_type(scalar.type)} -> {self._render_type(expr.type)}"
+            )
+            return _RenderedValue(name=result_name, type=expr.type)
+
+        if expr.name == "vdup":
+            value = self._lower_expr(expr.args[0], env, indent=indent, into=into)
+            position = self._render_string_literal(expr.args[1])
+            into.append(
+                self._indent(indent)
+                + f"{result_name} = pto.vdup {value.name}, {position} : "
+                + f"{self._render_type(value.type)} -> {self._render_type(expr.type)}"
+            )
+            return _RenderedValue(name=result_name, type=expr.type)
+
+        if expr.name == "vci":
+            index = self._lower_expr(expr.args[0], env, indent=indent, into=into)
+            order = self._render_string_literal(expr.args[1])
+            into.append(
+                self._indent(indent)
+                + f"{result_name} = pto.vci {index.name}, {order} : "
+                + f"{self._render_type(index.type)} -> {self._render_type(expr.type)}"
+            )
+            return _RenderedValue(name=result_name, type=expr.type)
+
+        if expr.name == "tensor_view_as_ptr":
+            source = self._lower_expr(expr.args[0], env, indent=indent, into=into)
+            into.append(
+                self._indent(indent)
+                + f"{result_name} = pto.tensor_view_addr {source.name} : "
+                + f"{self._render_type(source.type)} -> {self._render_type(expr.type)}"
+            )
+            return _RenderedValue(name=result_name, type=expr.type)
+
+        if expr.name == "tile_as_ptr":
+            source = self._lower_expr(expr.args[0], env, indent=indent, into=into)
+            into.append(
+                self._indent(indent)
+                + f"{result_name} = pto.tile_buf_addr {source.name} : "
                 + f"{self._render_type(source.type)} -> {self._render_type(expr.type)}"
             )
             return _RenderedValue(name=result_name, type=expr.type)
@@ -1893,7 +2096,60 @@ class _AuthoringRenderer:
             )
             return _RenderedValue(name=result_name, type=expr.type)
 
-        if expr.name in {"vabs", "vrelu", "vexp", "vnot"}:
+        if expr.name == "vcvt":
+            value = self._lower_expr(expr.args[0], env, indent=indent, into=into)
+            target_dtype = self._render_dtype_symbol(expr.args[1], context="pto.vcvt to_type")
+            mask = self._lower_expr(expr.args[2], env, indent=indent, into=into)
+            into.append(
+                self._indent(indent)
+                + f"{result_name} = pto.vcvt {value.name}, {target_dtype}, {mask.name} : "
+                + f"{self._render_type(value.type)}, {self._render_type(mask.type)} -> {self._render_type(expr.type)}"
+            )
+            return _RenderedValue(name=result_name, type=expr.type)
+
+        if expr.name == "vmrgsort4":
+            vec0 = self._lower_expr(expr.args[0], env, indent=indent, into=into)
+            vec1 = self._lower_expr(expr.args[1], env, indent=indent, into=into)
+            vec2 = self._lower_expr(expr.args[2], env, indent=indent, into=into)
+            vec3 = self._lower_expr(expr.args[3], env, indent=indent, into=into)
+            mask = self._lower_expr(expr.args[4], env, indent=indent, into=into)
+            into.append(
+                self._indent(indent)
+                + f"{result_name} = pto.vmrgsort4 {vec0.name}, {vec1.name}, {vec2.name}, {vec3.name}, {mask.name} : "
+                + f"{self._render_type(vec0.type)}, {self._render_type(vec1.type)}, {self._render_type(vec2.type)}, "
+                + f"{self._render_type(vec3.type)}, {self._render_type(mask.type)} -> {self._render_type(expr.type)}"
+            )
+            return _RenderedValue(name=result_name, type=expr.type)
+
+        if expr.name in {
+            "vabs",
+            "vrelu",
+            "vexp",
+            "vln",
+            "vsqrt",
+            "vrec",
+            "vnot",
+            "vcadd",
+            "vcmax",
+            "vbcnt",
+            "vneg",
+            "vcls",
+            "vcmin",
+            "vrsqrt",
+            "vmov",
+            "vsunpack",
+            "vzunpack",
+            "vusqz",
+            "vsqz",
+            "vexpdiff",
+            "vtrc",
+            "vbitsort",
+            "vcgadd",
+            "vcgmax",
+            "vcgmin",
+            "vcpadd",
+            "vsort32",
+        }:
             value = self._lower_expr(expr.args[0], env, indent=indent, into=into)
             mask = self._lower_expr(expr.args[1], env, indent=indent, into=into)
             into.append(
@@ -1903,7 +2159,27 @@ class _AuthoringRenderer:
             )
             return _RenderedValue(name=result_name, type=expr.type)
 
-        if expr.name in {"vadd", "vsub", "vmul", "vdiv", "vmax", "vmin", "vand", "vor", "vxor"}:
+        if expr.name in {
+            "vadd",
+            "vsub",
+            "vmul",
+            "vdiv",
+            "vmax",
+            "vmin",
+            "vand",
+            "vor",
+            "vxor",
+            "vaddrelu",
+            "vaddreluconv",
+            "vsubrelu",
+            "vmulconv",
+            "vshl",
+            "vshr",
+            "vprelu",
+            "vpack",
+            "vperm",
+            "vmrgsort",
+        }:
             lhs = self._lower_expr(expr.args[0], env, indent=indent, into=into)
             rhs = self._lower_expr(expr.args[1], env, indent=indent, into=into)
             mask = self._lower_expr(expr.args[2], env, indent=indent, into=into)
@@ -1915,7 +2191,19 @@ class _AuthoringRenderer:
             )
             return _RenderedValue(name=result_name, type=expr.type)
 
-        if expr.name in {"vadds", "vsubs", "vmuls", "vdivs", "vmaxs", "vmins"}:
+        if expr.name in {"vshift", "vslide"}:
+            vector = self._lower_expr(expr.args[0], env, indent=indent, into=into)
+            immediate = self._lower_expr(expr.args[1], env, indent=indent, into=into)
+            mask = self._lower_expr(expr.args[2], env, indent=indent, into=into)
+            into.append(
+                self._indent(indent)
+                + f"{result_name} = pto.{expr.name} {vector.name}, {immediate.name}, {mask.name} : "
+                + f"{self._render_type(vector.type)}, {self._render_type(immediate.type)}, {self._render_type(mask.type)} "
+                + f"-> {self._render_type(expr.type)}"
+            )
+            return _RenderedValue(name=result_name, type=expr.type)
+
+        if expr.name in {"vadds", "vsubs", "vmuls", "vdivs", "vmaxs", "vmins", "vlrelu", "vshls", "vshrs", "vands", "vors", "vxors"}:
             value = self._lower_expr(expr.args[0], env, indent=indent, into=into)
             scalar = self._lower_expr(expr.args[1], env, indent=indent, into=into)
             mask = self._lower_expr(expr.args[2], env, indent=indent, into=into)
@@ -1927,7 +2215,102 @@ class _AuthoringRenderer:
             )
             return _RenderedValue(name=result_name, type=expr.type)
 
+        if expr.name in {"vaxpy", "vmula"}:
+            vec0 = self._lower_expr(expr.args[0], env, indent=indent, into=into)
+            vec1 = self._lower_expr(expr.args[1], env, indent=indent, into=into)
+            vec2 = self._lower_expr(expr.args[2], env, indent=indent, into=into)
+            mask = self._lower_expr(expr.args[3], env, indent=indent, into=into)
+            into.append(
+                self._indent(indent)
+                + f"{result_name} = pto.{expr.name} {vec0.name}, {vec1.name}, {vec2.name}, {mask.name} : "
+                + f"{self._render_type(vec0.type)}, {self._render_type(vec1.type)}, {self._render_type(vec2.type)}, {self._render_type(mask.type)} "
+                + f"-> {self._render_type(expr.type)}"
+            )
+            return _RenderedValue(name=result_name, type=expr.type)
+
         raise NotImplementedError(f"unsupported pto call `{expr.name}` in lowering")
+
+    def _lower_compare_expr(
+        self,
+        op: str,
+        lhs: _RenderedValue,
+        rhs: _RenderedValue,
+        *,
+        indent: int,
+        desired_name: str | None,
+        into: list[str],
+    ) -> _RenderedValue:
+        result_name = desired_name or self._new_temp()
+        if isinstance(lhs.type, SemanticIndexType) and isinstance(rhs.type, SemanticIndexType):
+            index_predicates = {
+                "eq": "eq",
+                "ne": "ne",
+                "gt": "sgt",
+                "lt": "slt",
+                "ge": "sge",
+                "le": "sle",
+            }
+            predicate = index_predicates[op]
+        elif isinstance(lhs.type, SemanticScalarType) and lhs.type == rhs.type:
+            if lhs.type.dtype.name in {"f16", "bf16", "f32"}:
+                float_predicates = {
+                    "eq": "oeq",
+                    "ne": "une",
+                    "gt": "ogt",
+                    "lt": "olt",
+                    "ge": "oge",
+                    "le": "ole",
+                }
+                predicate = float_predicates[op]
+                cmp_name = "arith.cmpf"
+            else:
+                int_predicates = {
+                    "eq": "eq",
+                    "ne": "ne",
+                    "gt": "sgt",
+                    "lt": "slt",
+                    "ge": "sge",
+                    "le": "sle",
+                }
+                predicate = int_predicates[op]
+                cmp_name = "arith.cmpi"
+            into.append(
+                self._indent(indent)
+                + f"{result_name} = {cmp_name} {predicate}, {lhs.name}, {rhs.name} : "
+                f"{self._render_type(lhs.type)}"
+            )
+            return _RenderedValue(name=result_name, type=_I1_TYPE)
+        else:
+            raise NotImplementedError(
+                f"comparison lowering requires matching scalar types or index operands, got {lhs.type!r} and {rhs.type!r}"
+            )
+
+        into.append(
+            self._indent(indent)
+            + f"{result_name} = arith.cmpi {predicate}, {lhs.name}, {rhs.name} : {self._render_type(lhs.type)}"
+        )
+        return _RenderedValue(name=result_name, type=_I1_TYPE)
+
+    def _lower_bool_expr(
+        self,
+        op: str,
+        lhs_expr: SemanticExpr,
+        rhs_expr: SemanticExpr,
+        env: dict[str, _RenderedValue],
+        *,
+        indent: int,
+        desired_name: str | None,
+        into: list[str],
+    ) -> _RenderedValue:
+        lhs = self._lower_condition(lhs_expr, env, indent=indent, into=into)
+        rhs = self._lower_condition(rhs_expr, env, indent=indent, into=into)
+        result_name = desired_name or self._new_temp()
+        arith_op = "arith.andi" if op == "and" else "arith.ori"
+        into.append(
+            self._indent(indent)
+            + f"{result_name} = {arith_op} {lhs.name}, {rhs.name} : i1"
+        )
+        return _RenderedValue(name=result_name, type=_I1_TYPE)
 
     def _render_string_literal(self, expr: SemanticExpr) -> str:
         if isinstance(expr, SemanticLiteralExpr) and isinstance(expr.value, str):
@@ -1937,6 +2320,18 @@ class _AuthoringRenderer:
             escaped = expr.binding.value.replace("\\", "\\\\").replace('"', '\\"')
             return f'"{escaped}"'
         raise NotImplementedError("expected a string literal for TileLang DSL advanced-family lowering")
+
+    def _render_dtype_symbol(self, expr: SemanticExpr, *, context: str) -> str:
+        if isinstance(expr, SemanticSymbolExpr) and isinstance(expr.value, ScalarType):
+            return expr.value.name
+        if (
+            isinstance(expr, SemanticBindingRef)
+            and isinstance(expr.type, SemanticMetaType)
+            and expr.type.kind == "dtype"
+            and isinstance(expr.binding.value, ScalarType)
+        ):
+            return expr.binding.value.name
+        raise NotImplementedError(f"{context} expects a dtype symbol in TileLang DSL v1 lowering")
 
     def _lower_to_i1(
         self,
@@ -2112,6 +2507,32 @@ class _AuthoringRenderer:
                 into=into,
                 desired_name=desired_name,
             )
+        if (
+            into is not None
+            and isinstance(expr.base, SemanticAttributeAccess)
+            and expr.base.attr in {"shape", "valid_shape", "strides"}
+            and isinstance(expr.base.base, SemanticBindingRef)
+            and isinstance(expr.base.base.type, SemanticTensorViewType)
+            and isinstance(expr.index, SemanticLiteralExpr)
+            and isinstance(expr.index.value, int)
+        ):
+            tensor_value = env.get(
+                expr.base.base.binding.name,
+                _RenderedValue(expr.base.base.binding.ssa_name, expr.base.base.type),
+            )
+            result_name = desired_name or self._new_temp()
+            axis_value = self._materialize_constant(expr.index.value, SemanticIndexType())
+            op_name = (
+                "pto.get_tensor_view_stride"
+                if expr.base.attr == "strides"
+                else "pto.get_tensor_view_dim"
+            )
+            into.append(
+                self._indent(indent)
+                + f"{result_name} = {op_name} {tensor_value.name}, {axis_value} : "
+                + f"{self._render_type(tensor_value.type)} -> index"
+            )
+            return _RenderedValue(name=result_name, type=SemanticIndexType())
         value = self._extract_shape_subscript_value(expr, env)
         if isinstance(value, _RenderedValue):
             return value
@@ -2129,6 +2550,9 @@ class _AuthoringRenderer:
 
     def _tensor_shape_binding_name(self, tensor_name: str, axis: int) -> str:
         return f"__shape_{tensor_name}_{axis}"
+
+    def _tensor_stride_binding_name(self, tensor_name: str, axis: int) -> str:
+        return f"__stride_{tensor_name}_{axis}"
 
     def _materialize_tile_memref(
         self,
@@ -2190,15 +2614,15 @@ class _AuthoringRenderer:
         env: dict[str, _RenderedValue],
     ) -> int | _RenderedValue:
         if not isinstance(expr.base, SemanticAttributeAccess):
-            raise NotImplementedError("only shape indexing is supported in TileLang DSL v1 lowering")
-        if expr.base.attr not in {"shape", "valid_shape"}:
+            raise NotImplementedError("only shape/stride indexing is supported in TileLang DSL v1 lowering")
+        if expr.base.attr not in {"shape", "valid_shape", "strides"}:
             raise NotImplementedError(
-                "only `.shape[...]` and `.valid_shape[...]` indexing are supported in TileLang DSL v1 lowering"
+                "only `.shape[...]`, `.valid_shape[...]`, and `.strides[...]` indexing are supported in TileLang DSL v1 lowering"
             )
         if not isinstance(expr.index, SemanticLiteralExpr) or not isinstance(expr.index.value, int):
-            raise NotImplementedError("shape indices must be integer literals in TileLang DSL v1 lowering")
+            raise NotImplementedError("shape/stride indices must be integer literals in TileLang DSL v1 lowering")
         if not isinstance(expr.base.base, SemanticBindingRef):
-            raise NotImplementedError("shape indexing expects a bound TensorView or Tile value")
+            raise NotImplementedError("shape/stride indexing expects a bound TensorView or Tile value")
 
         base_binding = expr.base.base.binding
         base_value = env.get(base_binding.name, _RenderedValue(base_binding.ssa_name, base_binding.type))
@@ -2218,15 +2642,18 @@ class _AuthoringRenderer:
             return _RenderedValue(name=base_binding.ssa_name, type=base_type)
 
         if isinstance(base_type, SemanticTensorViewType):
-            hidden_name = self._tensor_shape_binding_name(base_binding.name, index)
+            if expr.base.attr == "strides":
+                hidden_name = self._tensor_stride_binding_name(base_binding.name, index)
+            else:
+                hidden_name = self._tensor_shape_binding_name(base_binding.name, index)
             hidden_value = env.get(hidden_name)
             if hidden_value is None:
                 raise NotImplementedError(
-                    f"missing TensorView shape binding for '{base_binding.name}.{expr.base.attr}[{index}]'"
+                    f"missing TensorView {expr.base.attr} binding for '{base_binding.name}.{expr.base.attr}[{index}]'"
                 )
             return hidden_value
 
-        raise NotImplementedError("shape indexing expects a Tile or TensorView operand")
+        raise NotImplementedError("shape/stride indexing expects a Tile or TensorView operand")
 
     def _format_shape_tuple(self, shape: tuple[int | None, ...]) -> str:
         return "(" + ", ".join("?" if dim is None else str(dim) for dim in shape) + ")"
@@ -2294,10 +2721,9 @@ class _AuthoringRenderer:
         if isinstance(ty, SemanticPtrType):
             return f"!pto.ptr<{ty.element_dtype.name}, {ty.memory_space}>"
         if isinstance(ty, SemanticTensorViewType):
-            return self._render_memref_type(
+            return self._render_tensor_view_type(
                 element_dtype=ty.element_dtype.name,
                 shape=("?",) * ty.rank,
-                memory_space="gm",
             )
         if isinstance(ty, SemanticTileType):
             return self._render_tile_buf_type(ty)
@@ -2331,6 +2757,15 @@ class _AuthoringRenderer:
     ) -> str:
         dims = "x".join(str(dim) for dim in shape)
         return f"memref<{dims}x{element_dtype}, {self._render_memref_memory_space(memory_space)}>"
+
+    def _render_tensor_view_type(
+        self,
+        *,
+        element_dtype: str,
+        shape: tuple[int | str, ...],
+    ) -> str:
+        dims = "x".join(str(dim) for dim in shape)
+        return f"!pto.tensor_view<{dims}x{element_dtype}>"
 
     def _render_memref_memory_space(self, memory_space: str) -> str:
         if memory_space == "gm":

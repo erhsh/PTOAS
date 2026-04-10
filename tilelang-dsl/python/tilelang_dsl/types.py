@@ -87,6 +87,14 @@ class PadMode(str, Enum):
     PadValue = "PadValue"
 
 
+class PositionMode(str, Enum):
+    LOWEST = "POS_LOWEST"
+
+
+class OrderMode(str, Enum):
+    ASC = "ORDER_ASC"
+
+
 @dataclass(frozen=True)
 class TileConfig:
     fields: tuple[tuple[str, Any], ...] = ()
@@ -135,9 +143,9 @@ def ptr(dtype: ScalarType, memory_space: MemorySpace) -> PointerType:
     return PointerType(element_dtype=dtype, memory_space=memory_space)
 
 
-def get_lanes(dtype: ScalarType) -> int:
+def bytewidth(dtype: ScalarType) -> int:
     if not isinstance(dtype, ScalarType):
-        raise TypeError("get_lanes expects a TileLang scalar dtype")
+        raise TypeError("bytewidth expects a TileLang scalar dtype")
     byte_widths = {
         "i8": 1,
         "i16": 2,
@@ -148,8 +156,20 @@ def get_lanes(dtype: ScalarType) -> int:
     }
     width = byte_widths.get(dtype.name)
     if width is None:
-        raise TypeError(f"dtype `{dtype.name}` is not supported by get_lanes")
-    return 256 // width
+        raise TypeError(f"dtype `{dtype.name}` is not supported by bytewidth")
+    return width
+
+
+def get_lanes(dtype: ScalarType) -> int:
+    return 256 // bytewidth(dtype)
+
+
+def elements_per_vreg(dtype: ScalarType) -> int:
+    return get_lanes(dtype)
+
+
+def constexpr(value: bool) -> bool:
+    return value
 
 
 __all__ = [
@@ -169,6 +189,8 @@ __all__ = [
     "MaskPattern",
     "PAT",
     "PadMode",
+    "PositionMode",
+    "OrderMode",
     "TileConfig",
     "TileSpecialization",
     "i1",
@@ -183,5 +205,8 @@ __all__ = [
     "AnyInt",
     "AnyType",
     "AnyMask",
+    "constexpr",
+    "bytewidth",
     "get_lanes",
+    "elements_per_vreg",
 ]

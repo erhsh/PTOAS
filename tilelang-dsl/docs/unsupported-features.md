@@ -34,7 +34,6 @@ the current package:
 - `pto.memref(...)`
 - `pto.vreg(...)`
 - `pto.mask_b8`, `pto.mask_b16`, `pto.mask_b32`
-- `GMPtr`, `UBPtr`, `UBRef`
 - `BLayout`, `SLayout`, `PadValue`
 - `SyncOpType`
 
@@ -47,13 +46,9 @@ and aliases from the guide.
 
 The following guide surfaces are not implemented as public APIs:
 
-- `tile.to_ubref()`
-- `tile.as_ptr()`
-- `tile.to_memref()`
 - `tile.slice(...)`
 - `tile.reshape(...)`
 - `pto.tile_from_ptr(...)`
-- `pto.tile_from_memref(...)`
 - `pto.tile_with_strides(...)`
 - `pto.tile_config(...)`
 
@@ -64,11 +59,6 @@ These documented surfaces are not accepted by the current frontend:
 - `pto.get_buf(...)`
 - `pto.rls_buf(...)`
 
-### Missing High-Level Tile Copy Surface
-
-The guide documents `pto.dma_copy(...)`, but the current package does not
-provide that high-level operation. Only the raw low-level copy op
-`pto.copy_ubuf_to_ubuf(...)` exists in advanced mode.
 
 ### Missing Vector Load/Store Families
 
@@ -77,7 +67,6 @@ load/store families. The following documented ops are still unsupported:
 
 - `pto.vldas(...)`
 - `pto.vldus(...)`
-- `pto.vplds(...)`
 - `pto.vldx2(...)`
 - `pto.vsld(...)`
 - `pto.psts(...)`
@@ -99,31 +88,11 @@ of the supported authoring surface:
 - `pto.pge_b8(...)`, `pto.pge_b16(...)`, `pto.pge_b32(...)`
 - `pto.plt_b8(...)`, `pto.plt_b16(...)`, `pto.plt_b32(...)`
 
-### Missing Unary/Conversion/Special Vector Ops
+### Missing Extended Vector Arithmetic Families
 
-The current package supports only a small subset of the unary/conversion
-families. These guide-documented ops are still unsupported:
-
-- `pto.vln(...)`
-- `pto.vsqrt(...)`
-- `pto.vrec(...)`
-- `pto.vcadd(...)`
-- `pto.vcmax(...)`
-- `pto.vbcnt(...)`
-- `pto.vtrc(...)`
-- `pto.vcvt(...)`
-- `pto.vbitsort(...)`
-- `pto.vmrgsort4(...)`
-
-### Missing Shift/Leaky-ReLU Vector Ops
-
-These documented ops are not currently supported:
-
-- `pto.vshl(...)`
-- `pto.vshr(...)`
-- `pto.vlrelu(...)`
-- `pto.vshls(...)`
-- `pto.vshrs(...)`
+The previously missing `13-vector-arithmetic-operations.md` gap list is now
+implemented in the current package surface (including fused ops, broadcast/index
+generation, reduction-flavored ops, and rearrangement/sort groups).
 
 ### Missing Predicate Rearrangement Shorthands
 
@@ -161,16 +130,22 @@ Literal support is currently limited to:
 `TensorView` currently supports only a narrow attribute subset:
 
 - `shape`
+- `strides`
 - `element_type`
 - `valid_shape`
 
 The following documented attributes are not implemented:
 
-- `strides`
 - `offset`
 
-In practice, `TensorView` is still treated as a 2D GM view in the current
-profile.
+In practice, `TensorView` is now modeled as a fixed 5D GM view in the current
+profile, but the DMA-oriented slicing/lowering path remains narrower than the
+full guide:
+
+- `shape` / `valid_shape` exposure follows the 5D descriptor
+- `strides` lower through hidden stride parameters carried alongside TensorView shape
+- fewer written slice axes are right-aligned onto the trailing physical axes
+- DMA-oriented slicing/lowering still only accepts rank-2 TensorView slices
 
 ### Tile Attribute Model
 
@@ -210,43 +185,14 @@ So this is currently metadata storage rather than full behavioral support.
 The guide presents general Python slicing with dynamic starts and strides. The
 current stable DMA-oriented implementation is still a narrower 2D profile:
 
-- only rank-2 TensorView slicing is supported
-- slice `stop` must be explicit
+- slice `stop` must be explicit on all dimensions
 - slice `start` may be a compile-time constant or runtime index expression
 - slice `step` must be a static positive integer
-- axis 0 may use `step > 1`
-- axis 1 must keep `step == 1`
+- dimension 0 may use `step > 1`
+- dimension 1 must keep `step == 1` (current DMA restriction)
 
 Dynamic bounds are supported within those constraints.
 
-### High-Level DMA Ops
-
-`pto.dma_load(...)` and `pto.dma_store(...)` now accept the documented keyword
-surface on the stable path, but the implemented contract is still a narrowed
-frontend-only subset.
-
-Implemented today:
-
-- non-zero/dynamic slice starts and dynamic stops
-- static positive outer-axis slice steps with inferred DMA strides
-- `dma_load` keywords: `pad_mode`, `pad_value`, `left_padding`,
-  `right_padding`, `init_out_buffer`
-- `dma_store` trim keywords: `left_padding`, `right_padding`
-- padded `dma_load` lowering for `PadNull`, `PadFirstElem`, and `PadValue`
-- trimmed `dma_store` lowering for `pad_mode=PadMode.PadNull`
-
-Still unsupported or intentionally deferred:
-
-- only rank-2 TensorView slices are accepted
-- the destination/source Tile must be a statically specialized rank-2 UB Tile
-- dynamic slice `step`
-- stepped DMA on TensorView slice axis 1
-- `dma_load(..., pad_mode=PadMode.PadNull, init_out_buffer=True)`
-- `dma_store(..., pad_mode != PadMode.PadNull, ...)`
-- `dma_store(..., pad_value=..., ...)`
-- store-side GM fill / backend-init semantics
-- any shape profile where slice extent does not match the Tile window after
-  applying padding or trim
 
 ### Tile Indexing Sugar
 
@@ -264,7 +210,7 @@ Not currently supported from the guide's broader indexing model:
 - single-element syntax such as `tile[row, col]` and `tile[pos]`
 - explicit slice `stop`
 - stepped tile vector slices
-- the guide's wider indexed op family (`vldas`, `vldus`, `vplds`, `vldx2`,
+- the guide's wider indexed op family (`vldas`, `vldus`, `vldx2`,
   `vsld`, `psts`, `vsst`, `vstx2`, `vsta`)
 
 ### Control-Flow Result Merging

@@ -143,6 +143,12 @@ class FrontendIfStmt(FrontendStmtNode):
     condition: FrontendExprNode
     then_body: tuple[FrontendStmtNode, ...]
     else_body: tuple[FrontendStmtNode, ...]
+    is_constexpr: bool = False
+
+
+@dataclass(frozen=True)
+class FrontendVecscopeStmt(FrontendStmtNode):
+    body: tuple[FrontendStmtNode, ...]
 
 
 @dataclass(frozen=True)
@@ -194,23 +200,54 @@ _BINARY_OP_NAMES = {
     ast.Mult: "mul",
     ast.FloorDiv: "floordiv",
 }
+_COMPARE_OP_NAMES = {
+    ast.Eq: "eq",
+    ast.NotEq: "ne",
+    ast.Gt: "gt",
+    ast.Lt: "lt",
+    ast.GtE: "ge",
+    ast.LtE: "le",
+}
+_BOOL_OP_NAMES = {
+    ast.And: "and",
+    ast.Or: "or",
+}
 
-_DMA_CALL_KEYWORDS = {
-    "dma_load": frozenset(
+_DMA_CALL_KEYWORDS: dict[str, frozenset[str]] = {
+    "set_loop2_stride_outtoub": frozenset({"src_stride", "dst_stride"}),
+    "set_loop1_stride_outtoub": frozenset({"src_stride", "dst_stride"}),
+    "set_loop_size_outtoub": frozenset({"loop1", "loop2"}),
+    "set_loop2_stride_ubtoout": frozenset({"src_stride", "dst_stride"}),
+    "set_loop1_stride_ubtoout": frozenset({"src_stride", "dst_stride"}),
+    "set_loop_size_ubtoout": frozenset({"loop1", "loop2"}),
+    "copy_gm_to_ubuf": frozenset(
         {
-            "pad_mode",
-            "pad_value",
-            "left_padding",
-            "right_padding",
-            "init_out_buffer",
+            "src",
+            "dst",
+            "sid",
+            "n_burst",
+            "len_burst",
+            "left_padding_count",
+            "right_padding_count",
+            "data_select_bit",
+            "enable_ub_pad",
+            "l2_cache_ctl",
+            "gm_stride",
+            "ub_stride",
         }
     ),
-    "dma_store": frozenset(
+    "copy_ubuf_to_gm": frozenset(
         {
-            "pad_mode",
-            "pad_value",
-            "left_padding",
-            "right_padding",
+            "src",
+            "dst",
+            "sid",
+            "n_burst",
+            "len_burst",
+            "reserved",
+            "burst_dst_stride",
+            "burst_src_stride",
+            "gm_stride",
+            "ub_stride",
         }
     ),
 }
@@ -284,7 +321,7 @@ def _build_call_keywords(
         raise context.error(
             node,
             f"`{call_name}` does not support keyword arguments in TileLang DSL v1; "
-            "only `pto.dma_load` and `pto.dma_store` currently accept them",
+            "no public call surface currently accepts them",
         )
 
     seen: set[str] = set()
@@ -342,6 +379,43 @@ def _build_expr(node: ast.AST, context: _FrontendBuildContext) -> FrontendExprNo
             op=op_name,
             rhs=_build_expr(node.right, context),
         )
+    if isinstance(node, ast.Compare):
+        if len(node.ops) != 1 or len(node.comparators) != 1:
+            raise context.error(
+                node,
+                "chained comparisons are not supported in TileLang DSL v1",
+            )
+        op_name = _COMPARE_OP_NAMES.get(type(node.ops[0]))
+        if op_name is None:
+            raise context.error(
+                node,
+                f"unsupported comparison operator `{type(node.ops[0]).__name__}` in TileLang DSL v1",
+            )
+        return FrontendBinaryExpr(
+            lhs=_build_expr(node.left, context),
+            op=op_name,
+            rhs=_build_expr(node.comparators[0], context),
+        )
+    if isinstance(node, ast.BoolOp):
+        op_name = _BOOL_OP_NAMES.get(type(node.op))
+        if op_name is None:
+            raise context.error(
+                node,
+                f"unsupported boolean operator `{type(node.op).__name__}` in TileLang DSL v1",
+            )
+        if len(node.values) < 2:
+            raise context.error(
+                node,
+                "boolean expressions must contain at least two operands in TileLang DSL v1",
+            )
+        expr = _build_expr(node.values[0], context)
+        for value in node.values[1:]:
+            expr = FrontendBinaryExpr(
+                lhs=expr,
+                op=op_name,
+                rhs=_build_expr(value, context),
+            )
+        return expr
     if isinstance(node, ast.Call):
         if (
             isinstance(node.func, ast.Attribute)
@@ -480,10 +554,32 @@ def _build_stmt(node: ast.stmt, context: _FrontendBuildContext) -> FrontendStmtN
             body=tuple(_build_stmt(stmt, context) for stmt in node.body),
         )
     if isinstance(node, ast.If):
+        is_constexpr = False
+        condition_node: ast.AST = node.test
+        if (
+            isinstance(node.test, ast.Call)
+            and isinstance(node.test.func, ast.Attribute)
+            and isinstance(node.test.func.value, ast.Name)
+            and node.test.func.value.id == "pto"
+            and node.test.func.attr == "constexpr"
+        ):
+            if node.test.keywords:
+                raise context.error(
+                    node.test,
+                    "pto.constexpr() does not support keyword arguments in TileLang DSL v1",
+                )
+            if len(node.test.args) != 1:
+                raise context.error(
+                    node.test,
+                    "pto.constexpr() expects exactly 1 positional argument in TileLang DSL v1",
+                )
+            is_constexpr = True
+            condition_node = node.test.args[0]
         return FrontendIfStmt(
-            condition=_build_expr(node.test, context),
+            condition=_build_expr(condition_node, context),
             then_body=tuple(_build_stmt(stmt, context) for stmt in node.body),
             else_body=tuple(_build_stmt(stmt, context) for stmt in node.orelse),
+            is_constexpr=is_constexpr,
         )
     if isinstance(node, ast.With):
         if len(node.items) != 1:
@@ -495,9 +591,28 @@ def _build_stmt(node: ast.stmt, context: _FrontendBuildContext) -> FrontendStmtN
             isinstance(item.context_expr.func, ast.Attribute)
             and isinstance(item.context_expr.func.value, ast.Name)
             and item.context_expr.func.value.id == "pto"
-            and item.context_expr.func.attr == "strict_vecscope"
         ):
-            raise context.error(item.context_expr, "only pto.strict_vecscope is supported in TileLang DSL v1")
+            raise context.error(
+                item.context_expr,
+                "only pto.vecscope/pto.strict_vecscope are supported in TileLang DSL v1",
+            )
+        with_name = item.context_expr.func.attr
+        if with_name == "vecscope":
+            if item.context_expr.args or item.context_expr.keywords:
+                raise context.error(
+                    item.context_expr,
+                    "pto.vecscope() does not accept positional or keyword arguments in TileLang DSL v1",
+                )
+            if item.optional_vars is not None:
+                raise context.error(item, "pto.vecscope() does not support `as` bindings in TileLang DSL v1")
+            return FrontendVecscopeStmt(
+                body=tuple(_build_stmt(stmt, context.nested_vecscope()) for stmt in node.body),
+            )
+        if with_name != "strict_vecscope":
+            raise context.error(
+                item.context_expr,
+                "only pto.vecscope/pto.strict_vecscope are supported in TileLang DSL v1",
+            )
         if not context.advanced_enabled:
             raise context.error(
                 item.context_expr,
@@ -582,6 +697,7 @@ __all__ = [
     "FrontendParameterNode",
     "FrontendReturnStmt",
     "FrontendSliceExpr",
+    "FrontendVecscopeStmt",
     "FrontendStrictVecscopeStmt",
     "FrontendStmtNode",
     "FrontendSubscriptExpr",
