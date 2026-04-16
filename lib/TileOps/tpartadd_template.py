@@ -53,7 +53,7 @@ def tpart_op(dst: pto.Tile, src0: pto.Tile, src1: pto.Tile,
     target="a5",
     op="pto.tpartadd"
 )
-def template_tpartadd(dst: pto.Tile, src0: pto.Tile, src1: pto.Tile):
+def template_tpartadd(src0: pto.Tile, src1: pto.Tile, dst: pto.Tile):
     dst_valid_rows, dst_valid_cols = dst.valid_shape
     src0_valid_rows, src0_valid_cols = src0.valid_shape
     src1_valid_rows, src1_valid_cols = src1.valid_shape
