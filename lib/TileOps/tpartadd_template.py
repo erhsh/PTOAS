@@ -28,7 +28,7 @@ def tpart_copy_instr(dst: pto.Tile, src: pto.Tile, valid_rows, valid_cols, start
     return None
 
 @pto.inline_proc
-def tpart_op(dst: pto.Tile, src0: pto.Tile, src1: pto.Tile, 
+def tpart_op(dst: pto.Tile, src0: pto.Tile, src1: pto.Tile,
              dst_valid_rows, dst_valid_cols, 
              src1_valid_rows, src1_valid_cols):
 
