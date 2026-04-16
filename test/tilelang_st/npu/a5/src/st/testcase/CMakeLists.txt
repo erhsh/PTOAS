@@ -120,6 +120,7 @@ set(ALL_TESTCASES
     tpartmul
     tpartmin
     tpartmax
+    tsort32
 )
 
 if((TEST_CASE IN_LIST ALL_TESTCASES) OR (TEST_CASE STREQUAL "all"))
