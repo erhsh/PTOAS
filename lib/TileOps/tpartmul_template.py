@@ -9,7 +9,7 @@ import tilelang_dsl as pto
     target="a5",
     op="pto.tpartmul"
 )
-def template_tpartmul(dst: pto.Tile, src0: pto.Tile, src1: pto.Tile):
+def template_tpartmul(src0: pto.Tile, src1: pto.Tile, dst: pto.Tile):
     dtype = dst.element_type
     lanes = pto.get_lanes(dtype)
 

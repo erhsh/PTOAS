@@ -116,6 +116,7 @@ set(ALL_TESTCASES
     tadd
     tload
     tpartadd
+    tpartmul
 )
 
 if((TEST_CASE IN_LIST ALL_TESTCASES) OR (TEST_CASE STREQUAL "all"))
