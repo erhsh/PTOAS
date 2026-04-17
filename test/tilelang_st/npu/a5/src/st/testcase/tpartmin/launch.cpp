@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Huawei Technologies Co., Ltd.
 // This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 // CANN Open Software License Agreement Version 2.0 (the "License").
-// Please refer to the License for details. You can not use the file except in compliance with the License.
+// Please refer to the License for details. You can not use this file except in compliance with the License.
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
@@ -12,30 +12,65 @@
 #define AICORE [aicore]
 #endif
 
-// Case 0: f32 16x64 full (src0/src1/dst all same valid region)
-extern "C" __global__ AICORE void TPARTMIN_f32_16x64_full(__gm__ float *a, __gm__ float *b, __gm__ float *c);
+// Case 0: f32 64x64 full
+extern "C" __global__ AICORE void TPARTMIN_f32_64x64_full(__gm__ float *a, __gm__ float *b, __gm__ float *c);
 
-void LaunchTPARTMIN_f32_16x64_full(float *a, float *b, float *c, void *stream) {
-    TPARTMIN_f32_16x64_full<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ float *)c);
+void LaunchTPARTMIN_f32_64x64_full(float *a, float *b, float *c, void *stream) {
+    TPARTMIN_f32_64x64_full<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ float *)c);
 }
 
-// Case 1: f32 16x64 src1 row less (src1 valid region 8x64, dst 16x64)
-extern "C" __global__ AICORE void TPARTMIN_f32_16x64_src1_row_less(__gm__ float *a, __gm__ float *b, __gm__ float *c);
+// Case 1: f32 64x64 src0 row less
+extern "C" __global__ AICORE void TPARTMIN_f32_64x64_src0_row_less(__gm__ float *a, __gm__ float *b, __gm__ float *c);
 
-void LaunchTPARTMIN_f32_16x64_src1_row_less(float *a, float *b, float *c, void *stream) {
-    TPARTMIN_f32_16x64_src1_row_less<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ float *)c);
+void LaunchTPARTMIN_f32_64x64_src0_row_less(float *a, float *b, float *c, void *stream) {
+    TPARTMIN_f32_64x64_src0_row_less<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ float *)c);
 }
 
-// Case 2: f32 16x64 src1 col less (src1 valid region 16x32, dst 16x64)
-extern "C" __global__ AICORE void TPARTMIN_f32_16x64_src1_col_less(__gm__ float *a, __gm__ float *b, __gm__ float *c);
+// Case 2: f32 64x64 src0 col less
+extern "C" __global__ AICORE void TPARTMIN_f32_64x64_src0_col_less(__gm__ float *a, __gm__ float *b, __gm__ float *c);
 
-void LaunchTPARTMIN_f32_16x64_src1_col_less(float *a, float *b, float *c, void *stream) {
-    TPARTMIN_f32_16x64_src1_col_less<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ float *)c);
+void LaunchTPARTMIN_f32_64x64_src0_col_less(float *a, float *b, float *c, void *stream) {
+    TPARTMIN_f32_64x64_src0_col_less<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ float *)c);
 }
 
-// Case 3: f32 32x32 src1 row less (src1 valid region 16x32, dst 32x32)
-extern "C" __global__ AICORE void TPARTMIN_f32_32x32_src1_row_less(__gm__ float *a, __gm__ float *b, __gm__ float *c);
+// Case 3: f32 64x64 src1 row less
+extern "C" __global__ AICORE void TPARTMIN_f32_64x64_src1_row_less(__gm__ float *a, __gm__ float *b, __gm__ float *c);
 
-void LaunchTPARTMIN_f32_32x32_src1_row_less(float *a, float *b, float *c, void *stream) {
-    TPARTMIN_f32_32x32_src1_row_less<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ float *)c);
+void LaunchTPARTMIN_f32_64x64_src1_row_less(float *a, float *b, float *c, void *stream) {
+    TPARTMIN_f32_64x64_src1_row_less<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ float *)c);
+}
+
+// Case 4: f32 64x64 src1 col less
+extern "C" __global__ AICORE void TPARTMIN_f32_64x64_src1_col_less(__gm__ float *a, __gm__ float *b, __gm__ float *c);
+
+void LaunchTPARTMIN_f32_64x64_src1_col_less(float *a, float *b, float *c, void *stream) {
+    TPARTMIN_f32_64x64_src1_col_less<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ float *)c);
+}
+
+// Case 5: f16 8x48 src0 col less
+extern "C" __global__ AICORE void TPARTMIN_f16_8x48_src0_col_less(__gm__ uint16_t *a, __gm__ uint16_t *b, __gm__ uint16_t *c);
+
+void LaunchTPARTMIN_f16_8x48_src0_col_less(uint16_t *a, uint16_t *b, uint16_t *c, void *stream) {
+    TPARTMIN_f16_8x48_src0_col_less<<<1, nullptr, stream>>>((__gm__ uint16_t *)a, (__gm__ uint16_t *)b, (__gm__ uint16_t *)c);
+}
+
+// Case 6: f16 8x768 src0 col less
+extern "C" __global__ AICORE void TPARTMIN_f16_8x768_src0_col_less(__gm__ uint16_t *a, __gm__ uint16_t *b, __gm__ uint16_t *c);
+
+void LaunchTPARTMIN_f16_8x768_src0_col_less(uint16_t *a, uint16_t *b, uint16_t *c, void *stream) {
+    TPARTMIN_f16_8x768_src0_col_less<<<1, nullptr, stream>>>((__gm__ uint16_t *)a, (__gm__ uint16_t *)b, (__gm__ uint16_t *)c);
+}
+
+// Case 7: i16 8x48 src1 col less
+extern "C" __global__ AICORE void TPARTMIN_i16_8x48_src1_col_less(__gm__ int16_t *a, __gm__ int16_t *b, __gm__ int16_t *c);
+
+void LaunchTPARTMIN_i16_8x48_src1_col_less(int16_t *a, int16_t *b, int16_t *c, void *stream) {
+    TPARTMIN_i16_8x48_src1_col_less<<<1, nullptr, stream>>>((__gm__ int16_t *)a, (__gm__ int16_t *)b, (__gm__ int16_t *)c);
+}
+
+// Case 8: i32 64x64 src0 row less
+extern "C" __global__ AICORE void TPARTMIN_i32_64x64_src0_row_less(__gm__ int32_t *a, __gm__ int32_t *b, __gm__ int32_t *c);
+
+void LaunchTPARTMIN_i32_64x64_src0_row_less(int32_t *a, int32_t *b, int32_t *c, void *stream) {
+    TPARTMIN_i32_64x64_src0_row_less<<<1, nullptr, stream>>>((__gm__ int32_t *)a, (__gm__ int32_t *)b, (__gm__ int32_t *)c);
 }
