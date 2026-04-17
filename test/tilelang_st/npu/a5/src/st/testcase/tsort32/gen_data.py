@@ -55,6 +55,10 @@ for case in CASES:
         idx_data = np.tile(idx_data, (src_rows, 1))
 
     # Compute golden: for each 32-element block, sort and output interleaved (value, index)
+    # Output stride coef: f32 uses 2 (value+index pair occupies 2 elements)
+    # Sort order: descending (largest to smallest), matching vbitsort hardware behavior
+    # Index is stored as int32 bit pattern interpreted as float32 (bitcast)
+    stride_coef = 2  # for f32
     golden = np.zeros(dst_shape, dtype=dtype)
 
     for row in range(src_vr):
@@ -67,32 +71,37 @@ for case in CASES:
                 block_data = input_data[row, block_start:block_end].copy()
                 block_idx = idx_data[0 if idx_vr == 1 else row, block_start:block_end].astype(np.int32)
 
-                # Sort by value
-                sorted_indices = np.argsort(block_data)
+                # Sort by value in descending order (largest to smallest)
+                sorted_indices = np.argsort(-block_data)
                 sorted_values = block_data[sorted_indices]
                 sorted_original_idx = block_idx[sorted_indices]
 
-                # Output interleaved (value, index) pairs
-                # For f32: stride coef = 2, so output format: [v0, idx0, v1, idx1, ...]
-                dst_offset = block_start * 4  # 4 = stride coef * 2 for interleaved
+                # Output interleaved (value, index) pairs with stride_coef=2
+                # Format: [value0, idx0, value1, idx1, ...]
+                # Index is stored as int32 bit pattern (bitcast to float32)
+                dst_offset = block_start * stride_coef
                 for i in range(block_size):
-                    golden[row, dst_offset + i * 4] = sorted_values[i]
-                    golden[row, dst_offset + i * 4 + 2] = sorted_original_idx[i]
+                    golden[row, dst_offset + i * stride_coef] = sorted_values[i]
+                    # Store index as int32 bit pattern interpreted as float32
+                    idx_i32 = np.array(sorted_original_idx[i], dtype=np.int32)
+                    golden[row, dst_offset + i * stride_coef + 1] = idx_i32.view(np.float32)
             else:
                 # Full 32-element block
                 block_data = input_data[row, block_start:block_end].copy()
                 block_idx = idx_data[0 if idx_vr == 1 else row, block_start:block_end].astype(np.int32)
 
-                # Sort by value
-                sorted_indices = np.argsort(block_data)
+                # Sort by value in descending order (largest to smallest)
+                sorted_indices = np.argsort(-block_data)
                 sorted_values = block_data[sorted_indices]
                 sorted_original_idx = block_idx[sorted_indices]
 
-                # Output interleaved (value, index) pairs
-                dst_offset = block_start * 4  # 4 = stride coef * 2 for interleaved
+                # Output interleaved (value, index) pairs with stride_coef=2
+                dst_offset = block_start * stride_coef
                 for i in range(BLOCK_SIZE):
-                    golden[row, dst_offset + i * 4] = sorted_values[i]
-                    golden[row, dst_offset + i * 4 + 2] = sorted_original_idx[i]
+                    golden[row, dst_offset + i * stride_coef] = sorted_values[i]
+                    # Store index as int32 bit pattern interpreted as float32
+                    idx_i32 = np.array(sorted_original_idx[i], dtype=np.int32)
+                    golden[row, dst_offset + i * stride_coef + 1] = idx_i32.view(np.float32)
 
     save_case_data(case["name"], {"input": input_data, "idx": idx_data.astype(np.uint32), "golden": golden})
     print(f"[INFO] gen_data: {case['name']} src_shape={src_shape} idx_shape={idx_shape} dst_shape={dst_shape} dtype={dtype.__name__}")
