@@ -22,12 +22,17 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTPARTADD_f32_16x64_full(float *a, float *b, float *c, void *stream);
-void LaunchTPARTADD_f32_16x64_src1_row_less(float *a, float *b, float *c, void *stream);
-void LaunchTPARTADD_f32_16x64_src1_col_less(float *a, float *b, float *c, void *stream);
-void LaunchTPARTADD_f32_32x32_src1_row_less(float *a, float *b, float *c, void *stream);
+void LaunchTPARTADD_f32_64x64_full(float *a, float *b, float *c, void *stream);
+void LaunchTPARTADD_f32_64x64_src0_row_less(float *a, float *b, float *c, void *stream);
+void LaunchTPARTADD_f32_64x64_src0_col_less(float *a, float *b, float *c, void *stream);
+void LaunchTPARTADD_f32_64x64_src1_row_less(float *a, float *b, float *c, void *stream);
+void LaunchTPARTADD_f32_64x64_src1_col_less(float *a, float *b, float *c, void *stream);
+void LaunchTPARTADD_f16_8x48_src0_col_less(uint16_t *a, uint16_t *b, uint16_t *c, void *stream);
+void LaunchTPARTADD_f16_8x768_src0_col_less(uint16_t *a, uint16_t *b, uint16_t *c, void *stream);
+void LaunchTPARTADD_i16_8x48_src1_col_less(int16_t *a, int16_t *b, int16_t *c, void *stream);
+void LaunchTPARTADD_i32_64x64_src0_row_less(int32_t *a, int32_t *b, int32_t *c, void *stream);
 
-using LaunchFn = void (*)(float *, float *, float *, void *);
+using LaunchFn = void (*)(void *, void *, void *, void *);
 
 struct TestCase {
     const char *name;
@@ -44,10 +49,15 @@ struct TestCase {
 };
 
 static const TestCase kCases[] = {
-    {"f32_16x64_full",           LaunchTPARTADD_f32_16x64_full,           16, 64, 16, 64, 16, 64, 16, 64, sizeof(float)},
-    {"f32_16x64_src1_row_less",  LaunchTPARTADD_f32_16x64_src1_row_less,  16, 64, 16, 64,  8, 64, 16, 64, sizeof(float)},
-    {"f32_16x64_src1_col_less",  LaunchTPARTADD_f32_16x64_src1_col_less,  16, 64, 16, 64, 16, 32, 16, 64, sizeof(float)},
-    {"f32_32x32_src1_row_less",  LaunchTPARTADD_f32_32x32_src1_row_less,  32, 32, 32, 32, 16, 32, 32, 32, sizeof(float)},
+    {"f32_64x64_full",           reinterpret_cast<LaunchFn>(LaunchTPARTADD_f32_64x64_full),           64, 64, 64, 64, 64, 64, 64, 64, sizeof(float)},
+    {"f32_64x64_src0_row_less",  reinterpret_cast<LaunchFn>(LaunchTPARTADD_f32_64x64_src0_row_less),  64, 64,  8, 64, 64, 64, 64, 64, sizeof(float)},
+    {"f32_64x64_src0_col_less",  reinterpret_cast<LaunchFn>(LaunchTPARTADD_f32_64x64_src0_col_less),  64, 64, 64,  8, 64, 64, 64, 64, sizeof(float)},
+    {"f32_64x64_src1_row_less",  reinterpret_cast<LaunchFn>(LaunchTPARTADD_f32_64x64_src1_row_less),  64, 64, 64, 64,  8, 64, 64, 64, sizeof(float)},
+    {"f32_64x64_src1_col_less",  reinterpret_cast<LaunchFn>(LaunchTPARTADD_f32_64x64_src1_col_less),  64, 64, 64, 64, 64,  8, 64, 64, sizeof(float)},
+    {"f16_8x48_src0_col_less",   reinterpret_cast<LaunchFn>(LaunchTPARTADD_f16_8x48_src0_col_less),    8, 48,  8, 16,  8, 48,  8, 48, sizeof(uint16_t)},
+    {"f16_8x768_src0_col_less",  reinterpret_cast<LaunchFn>(LaunchTPARTADD_f16_8x768_src0_col_less),   8,768,  8,512,  8,768,  8,768, sizeof(uint16_t)},
+    {"i16_8x48_src1_col_less",   reinterpret_cast<LaunchFn>(LaunchTPARTADD_i16_8x48_src1_col_less),    8, 48,  8, 48,  8, 16,  8, 48, sizeof(int16_t)},
+    {"i32_64x64_src0_row_less",  reinterpret_cast<LaunchFn>(LaunchTPARTADD_i32_64x64_src0_row_less),  64, 64,  8, 64, 64, 64, 64, 64, sizeof(int32_t)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
@@ -65,8 +75,8 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     size_t src0FileSize = fileSize;
     size_t src1FileSize = fileSize;
 
-    float *src0Host = nullptr, *src1Host = nullptr, *dstHost = nullptr;
-    float *src0Device = nullptr, *src1Device = nullptr, *dstDevice = nullptr;
+    void *src0Host = nullptr, *src1Host = nullptr, *dstHost = nullptr;
+    void *src0Device = nullptr, *src1Device = nullptr, *dstDevice = nullptr;
 
     aclrtMallocHost((void **)(&src0Host), fileSize);
     aclrtMallocHost((void **)(&src1Host), fileSize);
