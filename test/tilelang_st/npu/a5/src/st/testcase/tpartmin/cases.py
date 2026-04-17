@@ -34,40 +34,89 @@ gen_data.py and compare.py both import this list to avoid redundant definitions.
 import numpy as np
 
 CASES = [
+    # float32 cases
     {
-        "name": "f32_16x64_full",
+        "name": "f32_64x64_full",
         "dtype": np.float32,
-        "shape": (16, 64),
-        "valid_shape": (16, 64),      # src0 valid region
-        "src1_vshape": (16, 64),      # src1 valid region (same as dst)
-        "dst_vshape": (16, 64),       # dst valid region
+        "shape": (64, 64),
+        "valid_shape": (64, 64),      # src0 valid region
+        "src1_vshape": (64, 64),      # src1 valid region (same as dst)
+        "dst_vshape": (64, 64),       # dst valid region
         "eps": 1e-6,
     },
     {
-        "name": "f32_16x64_src1_row_less",
+        "name": "f32_64x64_src0_row_less",
         "dtype": np.float32,
-        "shape": (16, 64),
-        "valid_shape": (16, 64),      # src0 valid region (equals dst)
+        "shape": (64, 64),
+        "valid_shape": (8, 64),       # src0 valid region (row_less)
+        "src1_vshape": (64, 64),      # src1 valid region (equals dst)
+        "dst_vshape": (64, 64),       # dst valid region
+        "eps": 1e-6,
+    },
+    {
+        "name": "f32_64x64_src0_col_less",
+        "dtype": np.float32,
+        "shape": (64, 64),
+        "valid_shape": (64, 8),       # src0 valid region (col_less)
+        "src1_vshape": (64, 64),      # src1 valid region (equals dst)
+        "dst_vshape": (64, 64),       # dst valid region
+        "eps": 1e-6,
+    },
+    {
+        "name": "f32_64x64_src1_row_less",
+        "dtype": np.float32,
+        "shape": (64, 64),
+        "valid_shape": (64, 64),      # src0 valid region (equals dst)
         "src1_vshape": (8, 64),       # src1 valid region (row_less)
-        "dst_vshape": (16, 64),       # dst valid region
+        "dst_vshape": (64, 64),       # dst valid region
         "eps": 1e-6,
     },
     {
-        "name": "f32_16x64_src1_col_less",
+        "name": "f32_64x64_src1_col_less",
         "dtype": np.float32,
-        "shape": (16, 64),
-        "valid_shape": (16, 64),      # src0 valid region (equals dst)
-        "src1_vshape": (16, 32),      # src1 valid region (col_less)
-        "dst_vshape": (16, 64),       # dst valid region
+        "shape": (64, 64),
+        "valid_shape": (64, 64),      # src0 valid region (equals dst)
+        "src1_vshape": (64, 8),       # src1 valid region (col_less)
+        "dst_vshape": (64, 64),       # dst valid region
         "eps": 1e-6,
     },
+    # float16 cases
     {
-        "name": "f32_32x32_src1_row_less",
-        "dtype": np.float32,
-        "shape": (32, 32),
-        "valid_shape": (32, 32),      # src0 valid region (equals dst)
-        "src1_vshape": (16, 32),      # src1 valid region (row_less)
-        "dst_vshape": (32, 32),       # dst valid region
-        "eps": 1e-6,
+        "name": "f16_8x48_src0_col_less",
+        "dtype": np.float16,
+        "shape": (8, 48),
+        "valid_shape": (8, 16),       # src0 valid region (col_less)
+        "src1_vshape": (8, 48),       # src1 valid region (equals dst)
+        "dst_vshape": (8, 48),        # dst valid region
+        "eps": 1e-3,
+    },
+    {
+        "name": "f16_8x768_src0_col_less",
+        "dtype": np.float16,
+        "shape": (8, 768),
+        "valid_shape": (8, 512),      # src0 valid region (col_less)
+        "src1_vshape": (8, 768),      # src1 valid region (equals dst)
+        "dst_vshape": (8, 768),       # dst valid region
+        "eps": 1e-3,
+    },
+    # int16 cases
+    {
+        "name": "i16_8x48_src1_col_less",
+        "dtype": np.int16,
+        "shape": (8, 48),
+        "valid_shape": (8, 48),       # src0 valid region (equals dst)
+        "src1_vshape": (8, 16),       # src1 valid region (col_less)
+        "dst_vshape": (8, 48),        # dst valid region
+        "eps": 0,                      # exact match for int
+    },
+    # int32 cases
+    {
+        "name": "i32_64x64_src0_row_less",
+        "dtype": np.int32,
+        "shape": (64, 64),
+        "valid_shape": (8, 64),       # src0 valid region (row_less)
+        "src1_vshape": (64, 64),      # src1 valid region (equals dst)
+        "dst_vshape": (64, 64),       # dst valid region
+        "eps": 0,                      # exact match for int
     },
 ]

@@ -1,14 +1,14 @@
 // Copyright (c) 2026 Huawei Technologies Co., Ltd.
 // This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 // CANN Open Software License Agreement Version 2.0 (the "License").
-// Please refer to the License for details. You can not use the file except of compliance with the License.
+// Please refer to the License for details. You can not use this file except in compliance with the License.
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
 // Host driver for TileLang tpartmax ST — case-table driven.
 // Each case launches a different kernel variant, reads/writes from per-case subdirectory.
-// Numerical comparison is done externally by compare.cpp.
+// Numerical comparison is done externally by compare.py.
 
 #include "acl/acl.h"
 #include "test_common.h"
@@ -22,12 +22,17 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTPARTMAX_f32_16x64_full(float *a, float *b, float *c, void *stream);
-void LaunchTPARTMAX_f32_16x64_src1_row_less(float *a, float *b, float *c, void *stream);
-void LaunchTPARTMAX_f32_16x64_src1_col_less(float *a, float *b, float *c, void *stream);
-void LaunchTPARTMAX_f32_32x32_src1_row_less(float *a, float *b, float *c, void *stream);
+void LaunchTPARTMAX_f32_64x64_full(void *a, void *b, void *c, void *stream);
+void LaunchTPARTMAX_f32_64x64_src0_row_less(void *a, void *b, void *c, void *stream);
+void LaunchTPARTMAX_f32_64x64_src0_col_less(void *a, void *b, void *c, void *stream);
+void LaunchTPARTMAX_f32_64x64_src1_row_less(void *a, void *b, void *c, void *stream);
+void LaunchTPARTMAX_f32_64x64_src1_col_less(void *a, void *b, void *c, void *stream);
+void LaunchTPARTMAX_f16_8x48_src0_col_less(void *a, void *b, void *c, void *stream);
+void LaunchTPARTMAX_f16_8x768_src0_col_less(void *a, void *b, void *c, void *stream);
+void LaunchTPARTMAX_i16_8x48_src1_col_less(void *a, void *b, void *c, void *stream);
+void LaunchTPARTMAX_i32_64x64_src0_row_less(void *a, void *b, void *c, void *stream);
 
-using LaunchFn = void (*)(float *, float *, float *, void *);
+using LaunchFn = void (*)(void *, void *, void *, void *);
 
 struct TestCase {
     const char *name;
@@ -44,10 +49,15 @@ struct TestCase {
 };
 
 static const TestCase kCases[] = {
-    {"f32_16x64_full",           LaunchTPARTMAX_f32_16x64_full,           16, 64, 16, 64, 16, 64, 16, 64, sizeof(float)},
-    {"f32_16x64_src1_row_less",  LaunchTPARTMAX_f32_16x64_src1_row_less,  16, 64, 16, 64,  8, 64, 16, 64, sizeof(float)},
-    {"f32_16x64_src1_col_less",  LaunchTPARTMAX_f32_16x64_src1_col_less,  16, 64, 16, 64, 16, 32, 16, 64, sizeof(float)},
-    {"f32_32x32_src1_row_less",  LaunchTPARTMAX_f32_32x32_src1_row_less,  32, 32, 32, 32, 16, 32, 32, 32, sizeof(float)},
+    {"f32_64x64_full",           LaunchTPARTMAX_f32_64x64_full,           64, 64, 64, 64, 64, 64, 64, 64, sizeof(float)},
+    {"f32_64x64_src0_row_less",  LaunchTPARTMAX_f32_64x64_src0_row_less,  64, 64,  8, 64, 64, 64, 64, 64, sizeof(float)},
+    {"f32_64x64_src0_col_less",  LaunchTPARTMAX_f32_64x64_src0_col_less,  64, 64, 64,  8, 64, 64, 64, 64, sizeof(float)},
+    {"f32_64x64_src1_row_less",  LaunchTPARTMAX_f32_64x64_src1_row_less,  64, 64, 64, 64,  8, 64, 64, 64, sizeof(float)},
+    {"f32_64x64_src1_col_less",  LaunchTPARTMAX_f32_64x64_src1_col_less,  64, 64, 64, 64, 64,  8, 64, 64, sizeof(float)},
+    {"f16_8x48_src0_col_less",   LaunchTPARTMAX_f16_8x48_src0_col_less,    8, 48,  8, 16,  8, 48,  8, 48, sizeof(uint16_t)},
+    {"f16_8x768_src0_col_less",  LaunchTPARTMAX_f16_8x768_src0_col_less,   8,768,  8,512,  8,768,  8,768, sizeof(uint16_t)},
+    {"i16_8x48_src1_col_less",   LaunchTPARTMAX_i16_8x48_src1_col_less,    8, 48,  8, 48,  8, 16,  8, 48, sizeof(int16_t)},
+    {"i32_64x64_src0_row_less",  LaunchTPARTMAX_i32_64x64_src0_row_less,  64, 64,  8, 64, 64, 64, 64, 64, sizeof(int32_t)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
@@ -65,8 +75,8 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     size_t src0FileSize = fileSize;
     size_t src1FileSize = fileSize;
 
-    float *src0Host = nullptr, *src1Host = nullptr, *dstHost = nullptr;
-    float *src0Device = nullptr, *src1Device = nullptr, *dstDevice = nullptr;
+    void *src0Host = nullptr, *src1Host = nullptr, *dstHost = nullptr;
+    void *src0Device = nullptr, *src1Device = nullptr, *dstDevice = nullptr;
 
     aclrtMallocHost((void **)(&src0Host), fileSize);
     aclrtMallocHost((void **)(&src1Host), fileSize);
