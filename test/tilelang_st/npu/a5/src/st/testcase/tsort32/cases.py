@@ -39,6 +39,7 @@ gen_data.py and compare.py both import this list to avoid redundant definitions.
 import numpy as np
 
 CASES = [
+    # f32 cases - basic shapes
     {
         "name": "f32_1x32",
         "dtype": np.float32,
@@ -61,6 +62,18 @@ CASES = [
         "dst_vshape": (1, 128),     # actual valid output: src_cols * stride_coef = 64 * 2
         "eps": 1e-6,
     },
+    # f32 cases - multiple rows
+    {
+        "name": "f32_2x32",
+        "dtype": np.float32,
+        "src_shape": (2, 32),
+        "idx_shape": (2, 32),
+        "dst_shape": (2, 128),      # buffer allocation (src_cols * 4)
+        "valid_shape": (2, 32),
+        "idx_vshape": (2, 32),
+        "dst_vshape": (2, 64),      # actual valid output: src_cols * stride_coef = 32 * 2
+        "eps": 1e-6,
+    },
     {
         "name": "f32_16x32",
         "dtype": np.float32,
@@ -70,6 +83,18 @@ CASES = [
         "valid_shape": (16, 32),
         "idx_vshape": (16, 32),
         "dst_vshape": (16, 64),     # actual valid output: src_cols * stride_coef = 32 * 2
+        "eps": 1e-6,
+    },
+    # f32 cases - shared idx
+    {
+        "name": "f32_2x64_shared_idx",
+        "dtype": np.float32,
+        "src_shape": (2, 64),
+        "idx_shape": (1, 64),       # shared idx for all rows
+        "dst_shape": (2, 256),      # buffer allocation (src_cols * 4)
+        "valid_shape": (2, 64),
+        "idx_vshape": (1, 64),      # idx_valid_rows = 1 means shared idx
+        "dst_vshape": (2, 128),     # actual valid output: src_cols * stride_coef = 64 * 2
         "eps": 1e-6,
     },
     {
@@ -82,5 +107,40 @@ CASES = [
         "idx_vshape": (1, 64),      # idx_valid_rows = 1 means shared idx
         "dst_vshape": (16, 128),    # actual valid output: src_cols * stride_coef = 64 * 2
         "eps": 1e-6,
+    },
+    # f32 cases - large shape (multiple vbitsort calls)
+    {
+        "name": "f32_1x8192",
+        "dtype": np.float32,
+        "src_shape": (1, 8192),     # 256 * 32, requires loop_num > 1
+        "idx_shape": (1, 8192),
+        "dst_shape": (1, 32768),    # buffer allocation (src_cols * 4)
+        "valid_shape": (1, 8192),
+        "idx_vshape": (1, 8192),
+        "dst_vshape": (1, 16384),   # actual valid output: src_cols * stride_coef = 8192 * 2
+        "eps": 1e-6,
+    },
+    # f16 cases - basic shapes
+    {
+        "name": "f16_1x32",
+        "dtype": np.float16,
+        "src_shape": (1, 32),
+        "idx_shape": (1, 32),
+        "dst_shape": (1, 128),      # buffer allocation (src_cols * 4 for f16)
+        "valid_shape": (1, 32),
+        "idx_vshape": (1, 32),
+        "dst_vshape": (1, 128),     # actual valid output: src_cols * stride_coef = 32 * 4
+        "eps": 1e-3,
+    },
+    {
+        "name": "f16_4x64",
+        "dtype": np.float16,
+        "src_shape": (4, 64),
+        "idx_shape": (4, 64),
+        "dst_shape": (4, 256),      # buffer allocation (src_cols * 4 for f16)
+        "valid_shape": (4, 64),
+        "idx_vshape": (4, 64),
+        "dst_vshape": (4, 256),     # actual valid output: src_cols * stride_coef = 64 * 4
+        "eps": 1e-3,
     },
 ]

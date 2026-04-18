@@ -24,10 +24,15 @@ using namespace PtoTestCommon;
 // Kernel launch wrappers (defined in launch.cpp)
 void LaunchTSORT32_f32_1x32(float *src, uint32_t *idx, float *dst, void *stream);
 void LaunchTSORT32_f32_1x64(float *src, uint32_t *idx, float *dst, void *stream);
+void LaunchTSORT32_f32_2x32(float *src, uint32_t *idx, float *dst, void *stream);
 void LaunchTSORT32_f32_16x32(float *src, uint32_t *idx, float *dst, void *stream);
+void LaunchTSORT32_f32_2x64_shared_idx(float *src, uint32_t *idx, float *dst, void *stream);
 void LaunchTSORT32_f32_16x64_shared_idx(float *src, uint32_t *idx, float *dst, void *stream);
+void LaunchTSORT32_f32_1x8192(float *src, uint32_t *idx, float *dst, void *stream);
+void LaunchTSORT32_f16_1x32(uint16_t *src, uint32_t *idx, uint16_t *dst, void *stream);
+void LaunchTSORT32_f16_4x64(uint16_t *src, uint32_t *idx, uint16_t *dst, void *stream);
 
-using LaunchFn = void (*)(float *, uint32_t *, float *, void *);
+using LaunchFn = void (*)(void *, uint32_t *, void *, void *);
 
 struct TestCase {
     const char *name;
@@ -38,30 +43,36 @@ struct TestCase {
     size_t      idxCols;
     size_t      dstRows;
     size_t      dstCols;
+    size_t      elemSize;    // bytes per element
 };
 
 static const TestCase kCases[] = {
-    {"f32_1x32",               LaunchTSORT32_f32_1x32,               1,  32,  1,  32,  1,  128},
-    {"f32_1x64",               LaunchTSORT32_f32_1x64,               1,  64,  1,  64,  1,  256},
-    {"f32_16x32",              LaunchTSORT32_f32_16x32,              16, 32,  16, 32,  16, 128},
-    {"f32_16x64_shared_idx",   LaunchTSORT32_f32_16x64_shared_idx,   16, 64,  1,  64,  16, 256},
+    {"f32_1x32",               reinterpret_cast<LaunchFn>(LaunchTSORT32_f32_1x32),               1,  32,    1,  32,    1,  128,    sizeof(float)},
+    {"f32_1x64",               reinterpret_cast<LaunchFn>(LaunchTSORT32_f32_1x64),               1,  64,    1,  64,    1,  256,    sizeof(float)},
+    {"f32_2x32",               reinterpret_cast<LaunchFn>(LaunchTSORT32_f32_2x32),               2,  32,    2,  32,    2,  128,    sizeof(float)},
+    {"f32_16x32",              reinterpret_cast<LaunchFn>(LaunchTSORT32_f32_16x32),              16, 32,    16, 32,    16, 128,    sizeof(float)},
+    {"f32_2x64_shared_idx",    reinterpret_cast<LaunchFn>(LaunchTSORT32_f32_2x64_shared_idx),    2,  64,    1,  64,    2,  256,    sizeof(float)},
+    {"f32_16x64_shared_idx",   reinterpret_cast<LaunchFn>(LaunchTSORT32_f32_16x64_shared_idx),   16, 64,    1,  64,    16, 256,    sizeof(float)},
+    {"f32_1x8192",             reinterpret_cast<LaunchFn>(LaunchTSORT32_f32_1x8192),             1,  8192,  1,  8192,  1,  32768,  sizeof(float)},
+    {"f16_1x32",               reinterpret_cast<LaunchFn>(LaunchTSORT32_f16_1x32),               1,  32,    1,  32,    1,  128,    sizeof(uint16_t)},
+    {"f16_4x64",               reinterpret_cast<LaunchFn>(LaunchTSORT32_f16_4x64),               4,  64,    4,  64,    4,  256,    sizeof(uint16_t)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
 static int RunCase(const TestCase &tc, aclrtStream stream) {
     int rc = 0;
-    size_t srcFileSize = tc.srcRows * tc.srcCols * sizeof(float);
+    size_t srcFileSize = tc.srcRows * tc.srcCols * tc.elemSize;
     size_t idxFileSize = tc.idxRows * tc.idxCols * sizeof(uint32_t);
-    size_t dstFileSize = tc.dstRows * tc.dstCols * sizeof(float);
+    size_t dstFileSize = tc.dstRows * tc.dstCols * tc.elemSize;
 
     std::printf("[INFO] === case: %s (src=%zux%zu, idx=%zux%zu, dst=%zux%zu) ===\n",
                 tc.name, tc.srcRows, tc.srcCols, tc.idxRows, tc.idxCols, tc.dstRows, tc.dstCols);
 
     std::string caseDir = std::string("./") + tc.name;
 
-    float *srcHost = nullptr, *dstHost = nullptr;
+    void *srcHost = nullptr, *dstHost = nullptr;
     uint32_t *idxHost = nullptr;
-    float *srcDevice = nullptr, *dstDevice = nullptr;
+    void *srcDevice = nullptr, *dstDevice = nullptr;
     uint32_t *idxDevice = nullptr;
 
     aclrtMallocHost((void **)(&srcHost), srcFileSize);

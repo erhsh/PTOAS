@@ -12,30 +12,65 @@
 #define AICORE [aicore]
 #endif
 
-// Case 0: f32 1x32
+// Case: f32 1x32
 extern "C" __global__ AICORE void TSORT32_f32_1x32(__gm__ float *src, __gm__ uint32_t *idx, __gm__ float *dst);
 
 void LaunchTSORT32_f32_1x32(float *src, uint32_t *idx, float *dst, void *stream) {
     TSORT32_f32_1x32<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ uint32_t *)idx, (__gm__ float *)dst);
 }
 
-// Case 1: f32 1x64
+// Case: f32 1x64
 extern "C" __global__ AICORE void TSORT32_f32_1x64(__gm__ float *src, __gm__ uint32_t *idx, __gm__ float *dst);
 
 void LaunchTSORT32_f32_1x64(float *src, uint32_t *idx, float *dst, void *stream) {
     TSORT32_f32_1x64<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ uint32_t *)idx, (__gm__ float *)dst);
 }
 
-// Case 2: f32 16x32
+// Case: f32 2x32
+extern "C" __global__ AICORE void TSORT32_f32_2x32(__gm__ float *src, __gm__ uint32_t *idx, __gm__ float *dst);
+
+void LaunchTSORT32_f32_2x32(float *src, uint32_t *idx, float *dst, void *stream) {
+    TSORT32_f32_2x32<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ uint32_t *)idx, (__gm__ float *)dst);
+}
+
+// Case: f32 16x32
 extern "C" __global__ AICORE void TSORT32_f32_16x32(__gm__ float *src, __gm__ uint32_t *idx, __gm__ float *dst);
 
 void LaunchTSORT32_f32_16x32(float *src, uint32_t *idx, float *dst, void *stream) {
     TSORT32_f32_16x32<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ uint32_t *)idx, (__gm__ float *)dst);
 }
 
-// Case 3: f32 16x64 shared_idx
+// Case: f32 2x64 shared_idx
+extern "C" __global__ AICORE void TSORT32_f32_2x64_shared_idx(__gm__ float *src, __gm__ uint32_t *idx, __gm__ float *dst);
+
+void LaunchTSORT32_f32_2x64_shared_idx(float *src, uint32_t *idx, float *dst, void *stream) {
+    TSORT32_f32_2x64_shared_idx<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ uint32_t *)idx, (__gm__ float *)dst);
+}
+
+// Case: f32 16x64 shared_idx
 extern "C" __global__ AICORE void TSORT32_f32_16x64_shared_idx(__gm__ float *src, __gm__ uint32_t *idx, __gm__ float *dst);
 
 void LaunchTSORT32_f32_16x64_shared_idx(float *src, uint32_t *idx, float *dst, void *stream) {
     TSORT32_f32_16x64_shared_idx<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ uint32_t *)idx, (__gm__ float *)dst);
+}
+
+// Case: f32 1x8192 (large shape)
+extern "C" __global__ AICORE void TSORT32_f32_1x8192(__gm__ float *src, __gm__ uint32_t *idx, __gm__ float *dst);
+
+void LaunchTSORT32_f32_1x8192(float *src, uint32_t *idx, float *dst, void *stream) {
+    TSORT32_f32_1x8192<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ uint32_t *)idx, (__gm__ float *)dst);
+}
+
+// Case: f16 1x32
+extern "C" __global__ AICORE void TSORT32_f16_1x32(__gm__ uint16_t *src, __gm__ uint32_t *idx, __gm__ uint16_t *dst);
+
+void LaunchTSORT32_f16_1x32(uint16_t *src, uint32_t *idx, uint16_t *dst, void *stream) {
+    TSORT32_f16_1x32<<<1, nullptr, stream>>>((__gm__ uint16_t *)src, (__gm__ uint32_t *)idx, (__gm__ uint16_t *)dst);
+}
+
+// Case: f16 4x64
+extern "C" __global__ AICORE void TSORT32_f16_4x64(__gm__ uint16_t *src, __gm__ uint32_t *idx, __gm__ uint16_t *dst);
+
+void LaunchTSORT32_f16_4x64(uint16_t *src, uint32_t *idx, uint16_t *dst, void *stream) {
+    TSORT32_f16_4x64<<<1, nullptr, stream>>>((__gm__ uint16_t *)src, (__gm__ uint32_t *)idx, (__gm__ uint16_t *)dst);
 }
