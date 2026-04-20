@@ -34,7 +34,7 @@ gen_data.py and compare.py both import this list to avoid redundant definitions.
 import numpy as np
 
 CASES = [
-    # float32 cases
+    # float32 cases from pto-isa
     {
         "name": "f32_64x64_full",
         "dtype": np.float32,
@@ -45,78 +45,109 @@ CASES = [
         "eps": 1e-6,
     },
     {
-        "name": "f32_64x64_src0_row_less",
+        "name": "f32_2x24_src1_col_less",
         "dtype": np.float32,
-        "shape": (64, 64),
-        "valid_shape": (8, 64),       # src0 valid region (row_less)
-        "src1_vshape": (64, 64),      # src1 valid region (equals dst)
-        "dst_vshape": (64, 64),       # dst valid region
+        "shape": (2, 24),
+        "valid_shape": (2, 24),       # src0 valid region (equals dst)
+        "src1_vshape": (2, 8),        # src1 valid region (col_less)
+        "dst_vshape": (2, 24),        # dst valid region
         "eps": 1e-6,
     },
     {
-        "name": "f32_64x64_src0_col_less",
+        "name": "f32_128x64_src1_row_less",
         "dtype": np.float32,
-        "shape": (64, 64),
-        "valid_shape": (64, 8),       # src0 valid region (col_less)
-        "src1_vshape": (64, 64),      # src1 valid region (equals dst)
-        "dst_vshape": (64, 64),       # dst valid region
+        "shape": (128, 64),
+        "valid_shape": (128, 64),     # src0 valid region (equals dst)
+        "src1_vshape": (96, 64),      # src1 valid region (row_less)
+        "dst_vshape": (128, 64),      # dst valid region
         "eps": 1e-6,
     },
     {
-        "name": "f32_64x64_src1_row_less",
+        "name": "f32_95x95_full",
         "dtype": np.float32,
-        "shape": (64, 64),
-        "valid_shape": (64, 64),      # src0 valid region (equals dst)
-        "src1_vshape": (8, 64),       # src1 valid region (row_less)
-        "dst_vshape": (64, 64),       # dst valid region
+        "shape": (95, 95),
+        "valid_shape": (95, 95),      # src0 valid region
+        "src1_vshape": (95, 95),      # src1 valid region (same as dst)
+        "dst_vshape": (95, 95),       # dst valid region
         "eps": 1e-6,
     },
     {
-        "name": "f32_64x64_src1_col_less",
+        "name": "f32_122x123_complex",
         "dtype": np.float32,
-        "shape": (64, 64),
-        "valid_shape": (64, 64),      # src0 valid region (equals dst)
-        "src1_vshape": (64, 8),       # src1 valid region (col_less)
-        "dst_vshape": (64, 64),       # dst valid region
+        "shape": (122, 123),
+        "valid_shape": (104, 123),    # src0 valid region
+        "src1_vshape": (122, 110),    # src1 valid region
+        "dst_vshape": (122, 123),     # dst valid region (src1 rows, src0 cols)
         "eps": 1e-6,
     },
-    # float16 cases
+    # float16 cases from pto-isa
     {
-        "name": "f16_8x48_src0_col_less",
+        "name": "f16_122x123_complex",
         "dtype": np.float16,
-        "shape": (8, 48),
-        "valid_shape": (8, 16),       # src0 valid region (col_less)
-        "src1_vshape": (8, 48),       # src1 valid region (equals dst)
-        "dst_vshape": (8, 48),        # dst valid region
+        "shape": (122, 123),
+        "valid_shape": (104, 123),    # src0 valid region
+        "src1_vshape": (122, 110),    # src1 valid region
+        "dst_vshape": (122, 123),     # dst valid region
         "eps": 1e-3,
     },
+    # int16 cases from pto-isa
     {
-        "name": "f16_8x768_src0_col_less",
-        "dtype": np.float16,
-        "shape": (8, 768),
-        "valid_shape": (8, 512),      # src0 valid region (col_less)
-        "src1_vshape": (8, 768),      # src1 valid region (equals dst)
-        "dst_vshape": (8, 768),       # dst valid region
-        "eps": 1e-3,
-    },
-    # int16 cases
-    {
-        "name": "i16_8x48_src1_col_less",
+        "name": "i16_122x123_complex",
         "dtype": np.int16,
-        "shape": (8, 48),
-        "valid_shape": (8, 48),       # src0 valid region (equals dst)
-        "src1_vshape": (8, 16),       # src1 valid region (col_less)
-        "dst_vshape": (8, 48),        # dst valid region
-        "eps": 0,                      # exact match for int
+        "shape": (122, 123),
+        "valid_shape": (104, 123),    # src0 valid region
+        "src1_vshape": (122, 110),    # src1 valid region
+        "dst_vshape": (122, 123),     # dst valid region
+        "eps": 0,
     },
-    # int32 cases
+    # int32 cases from pto-isa
     {
-        "name": "i32_64x64_src0_row_less",
+        "name": "i32_122x123_complex",
         "dtype": np.int32,
-        "shape": (64, 64),
-        "valid_shape": (8, 64),       # src0 valid region (row_less)
-        "src1_vshape": (64, 64),      # src1 valid region (equals dst)
-        "dst_vshape": (64, 64),       # dst valid region
-        "eps": 0,                      # exact match for int
+        "shape": (122, 123),
+        "valid_shape": (104, 123),    # src0 valid region
+        "src1_vshape": (122, 110),    # src1 valid region
+        "dst_vshape": (122, 123),     # dst valid region
+        "eps": 0,
+    },
+    # uint16 cases from pto-isa
+    {
+        "name": "u16_122x123_complex",
+        "dtype": np.uint16,
+        "shape": (122, 123),
+        "valid_shape": (104, 123),    # src0 valid region
+        "src1_vshape": (122, 110),    # src1 valid region
+        "dst_vshape": (122, 123),     # dst valid region
+        "eps": 0,
+    },
+    # uint32 cases from pto-isa
+    {
+        "name": "u32_122x123_complex",
+        "dtype": np.uint32,
+        "shape": (122, 123),
+        "valid_shape": (104, 123),    # src0 valid region
+        "src1_vshape": (122, 110),    # src1 valid region
+        "dst_vshape": (122, 123),     # dst valid region
+        "eps": 0,
+    },
+    # int8 cases from pto-isa
+    {
+        "name": "i8_122x123_complex",
+        "dtype": np.int8,
+        "shape": (122, 123),
+        "valid_shape": (104, 123),    # src0 valid region
+        "src1_vshape": (122, 110),    # src1 valid region
+        "dst_vshape": (122, 123),     # dst valid region
+        "eps": 0,
+    },
+    # uint8 cases from pto-isa
+    {
+        "name": "u8_122x123_complex",
+        "dtype": np.uint8,
+        "shape": (122, 123),
+        "valid_shape": (104, 123),    # src0 valid region
+        "src1_vshape": (122, 110),    # src1 valid region
+        "dst_vshape": (122, 123),     # dst valid region
+        "eps": 0,
     },
 ]

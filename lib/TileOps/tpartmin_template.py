@@ -3,69 +3,62 @@
 import tilelang_dsl as pto
 
 
-@pto.inline_proc
-def tpart_op_instr(dst: pto.Tile, src0: pto.Tile, src1: pto.Tile, valid_rows, valid_cols):
-    dtype = dst.element_type
-    for row in range(0, valid_rows, 1):
-        remained = valid_cols
-        for col in range(0, valid_cols, pto.get_lanes(dtype)):
-            mask, remained = pto.make_mask(dtype, remained)
-            lhs = pto.vlds(src0[row, col:])
-            rhs = pto.vlds(src1[row, col:])
-            summed = pto.vmin(lhs, rhs, mask)
-            pto.vsts(summed, dst[row, col:], mask)
-    return None
-
-@pto.inline_proc
-def tpart_copy_instr(dst: pto.Tile, src: pto.Tile, valid_rows, valid_cols, start_row):
-    dtype = dst.element_type
-    for row in range(start_row, valid_rows, 1):
-        remained = valid_cols
-        for col in range(0, valid_cols, pto.get_lanes(dtype)):
-            mask, remained = pto.make_mask(dtype, remained)
-            val = pto.vlds(src[row, col:])
-            pto.vsts(val, dst[row, col:], mask)
-    return None
-
-@pto.inline_proc
-def tpart_op(dst: pto.Tile, src0: pto.Tile, src1: pto.Tile,
-             dst_valid_rows, dst_valid_cols,
-             src1_valid_rows, src1_valid_cols):
-
-    src1_eq_dst = (src1_valid_rows == dst_valid_rows and src1_valid_cols == dst_valid_cols)
-    src1_row_lt_dst = (src1_valid_rows < dst_valid_rows and src1_valid_cols == dst_valid_cols)
-    src1_col_lt_dst = (src1_valid_rows <= dst_valid_rows and src1_valid_cols < dst_valid_cols)
-
-    if src1_eq_dst:
-        tpart_op_instr(dst, src0, src1, dst_valid_rows, dst_valid_cols)
-    elif src1_col_lt_dst:
-        tpart_copy_instr(dst, src0, dst_valid_rows, dst_valid_cols, 0)
-        if src1_valid_cols > 0:
-            tpart_op_instr(dst, src0, src1, src1_valid_rows, src1_valid_cols)
-    elif src1_row_lt_dst:
-        if src1_valid_cols > 0:
-            tpart_op_instr(dst, src0, src1, src1_valid_rows, src1_valid_cols)
-        tpart_copy_instr(dst, src0, dst_valid_rows, dst_valid_cols, src1_valid_rows)
-
-    return
-
 @pto.vkernel(
     target="a5",
-    op="pto.tpartmin"
+    op="pto.tpartmin",
+    advanced=True,
 )
 def template_tpartmin(src0: pto.Tile, src1: pto.Tile, dst: pto.Tile):
-    dst_valid_rows, dst_valid_cols = dst.valid_shape
+    dtype = dst.element_type
+    valid_rows, valid_cols = dst.valid_shape
     src0_valid_rows, src0_valid_cols = src0.valid_shape
     src1_valid_rows, src1_valid_cols = src1.valid_shape
+    lanes = pto.get_lanes(dtype)
 
-    src0_eq_dst = (src0_valid_rows == dst_valid_rows and src0_valid_cols == dst_valid_cols)
-    src1_eq_dst = (src1_valid_rows == dst_valid_rows and src1_valid_cols == dst_valid_cols)
+    pad_scalar = pto.f32(3.402823466e+38)
+    if pto.constexpr(dtype == pto.f16):
+        pad_scalar = pto.f16(65504.0)
+    elif pto.constexpr(dtype == pto.bf16):
+        pad_scalar = pto.bf16(3.3856e+38)
+    elif pto.constexpr(dtype == pto.i32):
+        pad_scalar = pto.i32(2147483647)
+    elif pto.constexpr(dtype == pto.ui32):
+        # pad_scalar = pto.ui32(4294967295)
+        pass
+    elif pto.constexpr(dtype == pto.i16):
+        pad_scalar = pto.i16(32767)
+    elif pto.constexpr(dtype == pto.ui16):
+        # pad_scalar = pto.ui16(65535)
+        pass
+    elif pto.constexpr(dtype == pto.i8):
+        pad_scalar = pto.i8(127)
+    elif pto.constexpr(dtype == pto.ui8):
+        # pad_scalar = pto.ui8(255)
+        pass
 
-    if src0_eq_dst or src1_eq_dst:
-        if src0_eq_dst:
-            tpart_op(dst, src0, src1, dst_valid_rows, dst_valid_cols, src1_valid_rows, src1_valid_cols)
-        elif src1_eq_dst:
-            tpart_op(dst, src1, src0, dst_valid_rows, dst_valid_cols, src0_valid_rows, src0_valid_cols)
-    # TODO: raise an error later
+    pad_vec = pto.vbr(pad_scalar)
+
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, lanes):
+            mask, remained = pto.make_mask(dtype, remained)
+            # pto.vsts(pad_vec, dst[row, col:], mask)
+            pass
+
+    for row in range(0, src0_valid_rows, 1):
+        remained = src0_valid_cols
+        for col in range(0, src0_valid_cols, lanes):
+            mask, remained = pto.make_mask(dtype, remained)
+            vec0 = pto.vlds(src0[row, col:])
+            pto.vsts(vec0, dst[row, col:], mask)
+
+    for row in range(0, src1_valid_rows, 1):
+        remained = src1_valid_cols
+        for col in range(0, src1_valid_cols, lanes):
+            mask, remained = pto.make_mask(dtype, remained)
+            vec_dst = pto.vlds(dst[row, col:])
+            vec1 = pto.vlds(src1[row, col:])
+            result = pto.vmin(vec_dst, vec1, mask)
+            pto.vsts(result, dst[row, col:], mask)
 
     return
