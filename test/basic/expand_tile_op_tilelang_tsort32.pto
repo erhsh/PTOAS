@@ -29,14 +29,20 @@ module {
     %idx = pto.alloc_tile
       : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=32, v_row=1, v_col=32,
                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=32, v_row=1, v_col=32,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
     %dst = pto.alloc_tile
       : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=1, v_col=64,
                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
 
-    pto.tsort32 ins(%src, %idx : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=32, v_row=1, v_col=32,
+    pto.tsort32 ins(%src, %idx, %tmp : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=32, v_row=1, v_col=32,
                                 blayout=row_major, slayout=none_box, fractal=512, pad=0>,
                             !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=32, v_row=1, v_col=32,
-                                blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                                blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+                            !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=32, v_row=1, v_col=32,
+                                        blayout=row_major, slayout=none_box, fractal=512, pad=0>)
                outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=1, v_col=64,
                                      blayout=row_major, slayout=none_box, fractal=512, pad=0>)
     return
