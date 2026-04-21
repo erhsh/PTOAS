@@ -49,24 +49,30 @@ struct TestCase {
     size_t      dstValidRows;   // dst effective rows
     size_t      dstValidCols;   // dst effective cols
     size_t      elemSize;    // bytes per element
-    size_t      alignedCols; // aligned cols for stride (32-byte aligned)
 };
 
 static const TestCase kCases[] = {
-    {"f32_64x64_full",           reinterpret_cast<LaunchFn>(LaunchTPARTMIN_f32_64x64_full),           64, 64, 64, 64, 64, 64, 64, 64, sizeof(float), 64},
-    {"f32_2x24_src1_col_less",   reinterpret_cast<LaunchFn>(LaunchTPARTMIN_f32_2x24_src1_col_less),    2, 24,  2, 24,  2,  8,  2, 24, sizeof(float), 24},
-    {"f32_128x64_src1_row_less", reinterpret_cast<LaunchFn>(LaunchTPARTMIN_f32_128x64_src1_row_less), 128, 64,128, 64, 96, 64,128, 64, sizeof(float), 64},
-    {"f32_95x95_full",           reinterpret_cast<LaunchFn>(LaunchTPARTMIN_f32_95x95_full),           95, 95, 95, 95, 95, 95, 95, 95, sizeof(float), 96},
-    {"f32_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMIN_f32_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(float), 128},
-    {"f16_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMIN_f16_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(uint16_t), 256},
-    {"i16_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMIN_i16_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(int16_t), 256},
-    {"i32_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMIN_i32_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(int32_t), 128},
-    {"u16_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMIN_u16_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(uint16_t), 256},
-    {"u32_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMIN_u32_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(uint32_t), 128},
-    {"i8_122x123_complex",       reinterpret_cast<LaunchFn>(LaunchTPARTMIN_i8_122x123_complex),       122,123,104,123,122,110,122,123, sizeof(int8_t), 512},
-    {"u8_122x123_complex",       reinterpret_cast<LaunchFn>(LaunchTPARTMIN_u8_122x123_complex),       122,123,104,123,122,110,122,123, sizeof(uint8_t), 512},
+    {"f32_64x64_full",           reinterpret_cast<LaunchFn>(LaunchTPARTMIN_f32_64x64_full),           64, 64, 64, 64, 64, 64, 64, 64, sizeof(float)},
+    {"f32_2x24_src1_col_less",   reinterpret_cast<LaunchFn>(LaunchTPARTMIN_f32_2x24_src1_col_less),    2, 24,  2, 24,  2,  8,  2, 24, sizeof(float)},
+    {"f32_128x64_src1_row_less", reinterpret_cast<LaunchFn>(LaunchTPARTMIN_f32_128x64_src1_row_less), 128, 64,128, 64, 96, 64,128, 64, sizeof(float)},
+    {"f32_95x95_full",           reinterpret_cast<LaunchFn>(LaunchTPARTMIN_f32_95x95_full),           95, 95, 95, 95, 95, 95, 95, 95, sizeof(float)},
+    {"f32_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMIN_f32_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(float)},
+    {"f16_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMIN_f16_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(uint16_t)},
+    {"i16_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMIN_i16_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(int16_t)},
+    {"i32_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMIN_i32_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(int32_t)},
+    {"u16_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMIN_u16_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(uint16_t)},
+    {"u32_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMIN_u32_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(uint32_t)},
+    {"i8_122x123_complex",       reinterpret_cast<LaunchFn>(LaunchTPARTMIN_i8_122x123_complex),       122,123,104,123,122,110,122,123, sizeof(int8_t)},
+    {"u8_122x123_complex",       reinterpret_cast<LaunchFn>(LaunchTPARTMIN_u8_122x123_complex),       122,123,104,123,122,110,122,123, sizeof(uint8_t)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
+
+// Calculate aligned cols for 32-byte alignment
+static size_t CalcAlignedCols(size_t cols, size_t elemSize) {
+    size_t totalBytes = cols * elemSize;
+    size_t alignedBytes = ((totalBytes + 31) / 32) * 32;
+    return alignedBytes / elemSize;
+}
 
 // Helper to pad data with stride
 static void PadDataWithStride(const void *src, void *dst, size_t rows, size_t cols,
@@ -100,11 +106,12 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     int rc = 0;
     const size_t elemCount = tc.rows * tc.cols;
     const size_t fileSize  = elemCount * tc.elemSize;
-    const size_t paddedSize = tc.rows * tc.alignedCols * tc.elemSize;
+    const size_t alignedCols = CalcAlignedCols(tc.cols, tc.elemSize);
+    const size_t paddedSize = tc.rows * alignedCols * tc.elemSize;
 
     std::printf("[INFO] === case: %s (shape=%zux%zu, src0_valid=%zux%zu, src1_valid=%zux%zu, dst_valid=%zux%zu, alignedCols=%zu) ===\n",
                 tc.name, tc.rows, tc.cols, tc.src0ValidRows, tc.src0ValidCols,
-                tc.src1ValidRows, tc.src1ValidCols, tc.dstValidRows, tc.dstValidCols, tc.alignedCols);
+                tc.src1ValidRows, tc.src1ValidCols, tc.dstValidRows, tc.dstValidCols, alignedCols);
 
     // Per-case data directory
     std::string caseDir = std::string("./") + tc.name;
@@ -143,8 +150,8 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
 
     if (rc == 0) {
         // Pad input data with stride
-        PadDataWithStride(src0HostOrig, src0Host, tc.rows, tc.cols, tc.alignedCols, tc.elemSize);
-        PadDataWithStride(src1HostOrig, src1Host, tc.rows, tc.cols, tc.alignedCols, tc.elemSize);
+        PadDataWithStride(src0HostOrig, src0Host, tc.rows, tc.cols, alignedCols, tc.elemSize);
+        PadDataWithStride(src1HostOrig, src1Host, tc.rows, tc.cols, alignedCols, tc.elemSize);
 
         aclrtMemcpy(src0Device, paddedSize, src0Host, paddedSize, ACL_MEMCPY_HOST_TO_DEVICE);
         aclrtMemcpy(src1Device, paddedSize, src1Host, paddedSize, ACL_MEMCPY_HOST_TO_DEVICE);
@@ -155,7 +162,7 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
         aclrtMemcpy(dstHost, paddedSize, dstDevice, paddedSize, ACL_MEMCPY_DEVICE_TO_HOST);
 
         // Unpad output data
-        UnpadDataWithStride(dstHost, dstHostOrig, tc.rows, tc.cols, tc.alignedCols, tc.elemSize);
+        UnpadDataWithStride(dstHost, dstHostOrig, tc.rows, tc.cols, alignedCols, tc.elemSize);
     }
 
     if (rc == 0 && !WriteFile((caseDir + "/output.bin").c_str(), dstHostOrig, fileSize)) {
