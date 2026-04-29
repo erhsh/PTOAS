@@ -4129,7 +4129,7 @@ class _SemanticAnalyzer:
             raise TypeError("pto.addptr expects exactly 2 positional arguments in TileLang DSL")
         pointer, offset = args
         ptr = self._require_pointer_expr(pointer, "pto.addptr pointer")
-        self._require_index_typed_expr(offset)
+        self._require_index_or_integer_scalar_expr(offset, "pto.addptr offset")
         return SemanticCallExpr(namespace="pto", name="addptr", args=(ptr, offset), type=ptr.type)
 
     def _analyze_get_lanes(
@@ -6088,6 +6088,18 @@ class _SemanticAnalyzer:
                 "slice bounds and vector offsets must be index-typed in TileLang DSL v1",
                 expr,
             )
+
+    def _require_index_or_integer_scalar_expr(self, expr: SemanticExpr, context: str) -> None:
+        if isinstance(expr.type, SemanticIndexType):
+            return
+        if isinstance(expr.type, SemanticScalarType) and is_integer_dtype(expr.type.dtype):
+            bits = integer_bitwidth(expr.type.dtype)
+            if bits in {32, 64}:
+                return
+        self._raise_expr_type_error(
+            f"{context} must be index-typed or a 32/64-bit integer scalar in TileLang DSL v1",
+            expr,
+        )
 
     def _try_static_dtype(self, expr: SemanticExpr) -> ScalarType | None:
         if (

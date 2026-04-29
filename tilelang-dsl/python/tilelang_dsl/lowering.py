@@ -2878,7 +2878,7 @@ class _AuthoringRenderer:
 
         if expr.name == "addptr":
             pointer = self._lower_expr(expr.args[0], env, indent=indent, into=into)
-            offset = self._lower_expr(expr.args[1], env, indent=indent, into=into)
+            offset = self._lower_to_index(expr.args[1], env, indent=indent, into=into)
             into.append(
                 self._indent(indent)
                 + f"{result_name} = pto.addptr {pointer.name}, {offset.name} : "
