@@ -6605,10 +6605,12 @@ mlir::LogicalResult mlir::pto::TMrgSortOp::verify() {
     Type elemTy = getElemTy(dstTy);
     if (elemTy != getElemTy(tmpTy))
       return emitOpError() << "format2 expects dst/tmp element types to match";
-    auto dstShape = getShapeVec(dstTy);
-    auto tmpShape = getShapeVec(tmpTy);
-    if (dstShape != tmpShape)
-      return emitOpError() << "format2 expects dst/tmp shapes to match";
+    // del start
+    // auto dstShape = getShapeVec(dstTy);
+    // auto tmpShape = getShapeVec(tmpTy);
+    // if (dstShape != tmpShape)
+    //   return emitOpError() << "format2 expects dst/tmp shapes to match";
+    // del end
     for (Value src : getSrcs()) {
       Type srcTy = src.getType();
       if (getElemTy(srcTy) != elemTy)

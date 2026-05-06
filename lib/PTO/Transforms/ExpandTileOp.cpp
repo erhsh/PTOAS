@@ -273,6 +273,12 @@ static void appendOpContextAttrs(
                          stringifyCmpMode(cmpModeAttr.getValue()).str());
     }
   }
+  if (auto tmrgsort = dyn_cast<pto::TMrgSortOp>(op)) {
+    if (tmrgsort.getExhaustedAttr()) {
+      bool exhausted = tmrgsort.getExhausted();
+      attrs.emplace_back("exhausted", exhausted ? "1" : "0");
+    }
+  }
 }
 
 static bool getStaticIntFromValue(Value value, int64_t &out) {
@@ -414,6 +420,16 @@ static std::optional<OperandTypeInfo> buildOperandTypeInfo(Value value) {
         // strides populated — dynamic dims remain ShapedType::kDynamic.
       }
     }
+    return info;
+  }
+
+  // Vector operand — extract element type for scalar-like handling.
+  if (auto vecTy = dyn_cast<VectorType>(ty)) {
+    OperandTypeInfo info;
+    info.kind = OperandKind::Scalar;
+    info.dtype = getDtypeString(vecTy.getElementType());
+    if (info.dtype.empty())
+      return std::nullopt;
     return info;
   }
 
