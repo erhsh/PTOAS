@@ -37,4 +37,26 @@ CASES = [
         "valid_shape": (32, 32),
         "eps": 1e-6,
     },
+    # Integer division test cases for high-precision validation
+    {
+        "name": "ui32_16x64",
+        "dtype": np.uint32,
+        "shape": (16, 64),
+        "valid_shape": (16, 64),
+        "eps": 0,  # Integer: exact comparison
+    },
+    {
+        "name": "ui16_16x64",
+        "dtype": np.uint16,
+        "shape": (16, 64),
+        "valid_shape": (16, 64),
+        "eps": 0,
+    },
+    {
+        "name": "i32_16x64",
+        "dtype": np.int32,
+        "shape": (16, 64),
+        "valid_shape": (16, 64),
+        "eps": 0,
+    },
 ]

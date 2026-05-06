@@ -24,8 +24,12 @@ using namespace PtoTestCommon;
 // Kernel launch wrappers (defined in launch.cpp)
 void LaunchTDIV_f32_16x64(float *a, float *b, float *c, void *stream);
 void LaunchTDIV_f32_32x32(float *a, float *b, float *c, void *stream);
+void LaunchTDIV_ui32_16x64(uint32_t *a, uint32_t *b, uint32_t *c, void *stream);
+void LaunchTDIV_ui16_16x64(uint16_t *a, uint16_t *b, uint16_t *c, void *stream);
+void LaunchTDIV_i32_16x64(int32_t *a, int32_t *b, int32_t *c, void *stream);
 
-using LaunchFn = void (*)(float *, float *, float *, void *);
+// Generic launch function type for void* pointers
+using LaunchFn = void (*)(void *a, void *b, void *c, void *stream);
 
 struct TestCase {
     const char *name;
@@ -38,8 +42,11 @@ struct TestCase {
 };
 
 static const TestCase kCases[] = {
-    {"f32_16x64", LaunchTDIV_f32_16x64, 16, 64, 16, 64, sizeof(float)},
-    {"f32_32x32", LaunchTDIV_f32_32x32, 32, 32, 32, 32, sizeof(float)},
+    {"f32_16x64", (LaunchFn)LaunchTDIV_f32_16x64, 16, 64, 16, 64, sizeof(float)},
+    {"f32_32x32", (LaunchFn)LaunchTDIV_f32_32x32, 32, 32, 32, 32, sizeof(float)},
+    {"ui32_16x64", (LaunchFn)LaunchTDIV_ui32_16x64, 16, 64, 16, 64, sizeof(uint32_t)},
+    {"ui16_16x64", (LaunchFn)LaunchTDIV_ui16_16x64, 16, 64, 16, 64, sizeof(uint16_t)},
+    {"i32_16x64", (LaunchFn)LaunchTDIV_i32_16x64, 16, 64, 16, 64, sizeof(int32_t)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
@@ -56,16 +63,16 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     size_t src0FileSize = fileSize;
     size_t src1FileSize = fileSize;
 
-    float *src0Host = nullptr, *src1Host = nullptr, *dstHost = nullptr;
-    float *src0Device = nullptr, *src1Device = nullptr, *dstDevice = nullptr;
+    void *src0Host = nullptr, *src1Host = nullptr, *dstHost = nullptr;
+    void *src0Device = nullptr, *src1Device = nullptr, *dstDevice = nullptr;
 
-    aclrtMallocHost((void **)(&src0Host), fileSize);
-    aclrtMallocHost((void **)(&src1Host), fileSize);
-    aclrtMallocHost((void **)(&dstHost), fileSize);
+    aclrtMallocHost(&src0Host, fileSize);
+    aclrtMallocHost(&src1Host, fileSize);
+    aclrtMallocHost(&dstHost, fileSize);
 
-    aclrtMalloc((void **)&src0Device, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&src1Device, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&dstDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc(&src0Device, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc(&src1Device, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc(&dstDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
 
     if (!ReadFile((caseDir + "/input1.bin").c_str(), src0FileSize, src0Host, fileSize)) {
         std::fprintf(stderr, "[ERROR] failed to read %s/input1.bin\n", caseDir.c_str());

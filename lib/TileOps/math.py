@@ -8,6 +8,20 @@
 
 import tilelang_dsl as pto
 
+# ============================================================================
+# High-precision integer division/modulo control
+#
+# To switch precision mode, modify the constexpr value below:
+#   True  = High-precision: three-candidate error minimization search
+#   False = Low-precision:  two-pass iterative correction (original)
+#
+# NOTE: inline_proc cannot capture module-level variables, so the value
+#       must be changed directly in the constexpr() calls in each function.
+# ============================================================================
+
+# Convenience constant for documentation (not used in inline_proc)
+PTO_HIGH_PRECISION_INT_DIV = True  # Change to False for low-precision mode
+
 
 @pto.inline_proc
 def _tl_soft_vdiv_u8(vec, scalar_vec, mask):
@@ -108,16 +122,46 @@ def _tl_soft_vdiv_u16(vec, scalar_vec, mask):
 
     yq_tmp = pto.vmul(q_tmp, scalar_vec, active_mask)
     r_tmp = pto.vsub(vec, yq_tmp, active_mask)
-    ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
-    refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
-    r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
-    q_inc = pto.vadds(q_tmp, one, active_mask)
-    q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
-    ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
-    refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
-    r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
-    q_inc = pto.vadds(q_tmp, one, active_mask)
-    q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
+
+    if pto.constexpr(True):
+        # High-precision: three-candidate error minimization search
+        # Check z-1, z, z+1 and select the candidate with smallest error
+        one_vec = pto.vbr(one)
+        q_pre = pto.vsub(q_tmp, one_vec, active_mask)
+        q_next = pto.vadds(q_tmp, one, active_mask)
+        yq_pre = pto.vmul(q_pre, scalar_vec, active_mask)
+        yq_next = pto.vmul(q_next, scalar_vec, active_mask)
+        r_pre = pto.vsub(vec, yq_pre, active_mask)
+        r_next = pto.vsub(vec, yq_next, active_mask)
+
+        # Overflow detection: if r + y < y, then r overflowed (negative)
+        # Special case: if r + y == 0, it means r + y wraps to max+1, not overflow
+        r_plus_y = pto.vadd(r_tmp, scalar_vec, active_mask)
+        wrap_to_zero = pto.vcmp(r_plus_y, zero_u16, active_mask, pto.CmpMode.EQ)
+        overflow_mask = pto.vcmp(r_plus_y, scalar_vec, active_mask, pto.CmpMode.LT)
+        overflow_mask = pto.pand(overflow_mask, pto.pnot(wrap_to_zero, active_mask), active_mask)
+
+        # ge_mask: r >= y (quotient too small)
+        ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
+
+        # Selection: overflow -> q_pre, ge -> q_next, else keep q_tmp
+        q_tmp = pto.vsel(q_pre, q_tmp, overflow_mask)
+        r_tmp = pto.vsel(r_pre, r_tmp, overflow_mask)
+        q_tmp = pto.vsel(q_next, q_tmp, ge_mask)
+        r_tmp = pto.vsel(r_next, r_tmp, ge_mask)
+    else:
+        # Low-precision: two-pass iterative correction (original)
+        ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
+        refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
+        r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
+        q_inc = pto.vadds(q_tmp, one, active_mask)
+        q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
+        ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
+        refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
+        r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
+        q_inc = pto.vadds(q_tmp, one, active_mask)
+        q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
+
     zero_q = pto.vbr(pto.ui16(0xFFFF))
     return pto.vsel(zero_q, q_tmp, zero_mask)
 
@@ -241,16 +285,43 @@ def _tl_soft_vmod_u16(vec, scalar_vec, mask):
 
     yq_tmp = pto.vmul(q_tmp, scalar_vec, active_mask)
     r_tmp = pto.vsub(vec, yq_tmp, active_mask)
-    ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
-    refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
-    r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
-    q_inc = pto.vadds(q_tmp, one, active_mask)
-    q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
-    ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
-    refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
-    r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
-    q_inc = pto.vadds(q_tmp, one, active_mask)
-    q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
+
+    if pto.constexpr(True):
+        # High-precision: three-candidate search for quotient
+        one_vec = pto.vbr(one)
+        q_pre = pto.vsub(q_tmp, one_vec, active_mask)
+        q_next = pto.vadds(q_tmp, one, active_mask)
+        yq_pre = pto.vmul(q_pre, scalar_vec, active_mask)
+        yq_next = pto.vmul(q_next, scalar_vec, active_mask)
+        r_pre = pto.vsub(vec, yq_pre, active_mask)
+        r_next = pto.vsub(vec, yq_next, active_mask)
+
+        # Overflow detection: if r + y < y, then r overflowed (negative)
+        # Special case: if r + y == 0, it means r + y wraps to max+1, not overflow
+        r_plus_y = pto.vadd(r_tmp, scalar_vec, active_mask)
+        wrap_to_zero = pto.vcmp(r_plus_y, zero_u16, active_mask, pto.CmpMode.EQ)
+        overflow_mask = pto.vcmp(r_plus_y, scalar_vec, active_mask, pto.CmpMode.LT)
+        overflow_mask = pto.pand(overflow_mask, pto.pnot(wrap_to_zero, active_mask), active_mask)
+
+        # ge_mask: r >= y (quotient too small)
+        ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
+
+        # Select correct remainder
+        r_tmp = pto.vsel(r_pre, r_tmp, overflow_mask)
+        r_tmp = pto.vsel(r_next, r_tmp, ge_mask)
+    else:
+        # Low-precision: two-pass iterative correction (original)
+        ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
+        refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
+        r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
+        q_inc = pto.vadds(q_tmp, one, active_mask)
+        q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
+        ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
+        refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
+        r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
+        q_inc = pto.vadds(q_tmp, one, active_mask)
+        q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
+
     return pto.vsel(pto.vbr(zero_r), r_tmp, zero_mask)
 
 
@@ -302,16 +373,45 @@ def _tl_soft_vdiv_u32(vec, scalar_vec, mask):
     _q_lower, q_tmp = pto.vmull(vec, z, full_mask)
     yq_tmp = pto.vmul(q_tmp, scalar_vec, active_mask)
     r_tmp = pto.vsub(vec, yq_tmp, active_mask)
-    ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
-    refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
-    r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
-    q_inc = pto.vadds(q_tmp, one, active_mask)
-    q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
-    ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
-    refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
-    r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
-    q_inc = pto.vadds(q_tmp, one, active_mask)
-    q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
+
+    if pto.constexpr(True):
+        # High-precision: three-candidate error minimization search
+        one_vec = pto.vbr(one)
+        q_pre = pto.vsub(q_tmp, one_vec, active_mask)
+        q_next = pto.vadds(q_tmp, one, active_mask)
+        yq_pre = pto.vmul(q_pre, scalar_vec, active_mask)
+        yq_next = pto.vmul(q_next, scalar_vec, active_mask)
+        r_pre = pto.vsub(vec, yq_pre, active_mask)
+        r_next = pto.vsub(vec, yq_next, active_mask)
+
+        # Overflow detection: if r + y < y, then r overflowed (negative)
+        # Special case: if r + y == 0, it means r + y wraps to max+1, not overflow
+        r_plus_y = pto.vadd(r_tmp, scalar_vec, active_mask)
+        wrap_to_zero = pto.vcmp(r_plus_y, zero_u32, active_mask, pto.CmpMode.EQ)
+        overflow_mask = pto.vcmp(r_plus_y, scalar_vec, active_mask, pto.CmpMode.LT)
+        overflow_mask = pto.pand(overflow_mask, pto.pnot(wrap_to_zero, active_mask), active_mask)
+
+        # ge_mask: r >= y (quotient too small)
+        ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
+
+        # Selection: overflow -> q_pre, ge -> q_next, else keep q_tmp
+        q_tmp = pto.vsel(q_pre, q_tmp, overflow_mask)
+        r_tmp = pto.vsel(r_pre, r_tmp, overflow_mask)
+        q_tmp = pto.vsel(q_next, q_tmp, ge_mask)
+        r_tmp = pto.vsel(r_next, r_tmp, ge_mask)
+    else:
+        # Low-precision: two-pass iterative correction (original)
+        ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
+        refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
+        r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
+        q_inc = pto.vadds(q_tmp, one, active_mask)
+        q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
+        ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
+        refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
+        r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
+        q_inc = pto.vadds(q_tmp, one, active_mask)
+        q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
+
     return pto.vsel(pto.vbr(zero_q), q_tmp, zero_mask)
 
 
@@ -460,16 +560,43 @@ def _tl_soft_vmod_u32(vec, scalar_vec, mask):
     _q_lower, q_tmp = pto.vmull(vec, z, full_mask)
     yq_tmp = pto.vmul(q_tmp, scalar_vec, active_mask)
     r_tmp = pto.vsub(vec, yq_tmp, active_mask)
-    ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
-    refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
-    r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
-    q_inc = pto.vadds(q_tmp, one, active_mask)
-    q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
-    ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
-    refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
-    r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
-    q_inc = pto.vadds(q_tmp, one, active_mask)
-    q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
+
+    if pto.constexpr(True):
+        # High-precision: three-candidate search for quotient
+        one_vec = pto.vbr(one)
+        q_pre = pto.vsub(q_tmp, one_vec, active_mask)
+        q_next = pto.vadds(q_tmp, one, active_mask)
+        yq_pre = pto.vmul(q_pre, scalar_vec, active_mask)
+        yq_next = pto.vmul(q_next, scalar_vec, active_mask)
+        r_pre = pto.vsub(vec, yq_pre, active_mask)
+        r_next = pto.vsub(vec, yq_next, active_mask)
+
+        # Overflow detection: if r + y < y, then r overflowed (negative)
+        # Special case: if r + y == 0, it means r + y wraps to max+1, not overflow
+        r_plus_y = pto.vadd(r_tmp, scalar_vec, active_mask)
+        wrap_to_zero = pto.vcmp(r_plus_y, zero_u32, active_mask, pto.CmpMode.EQ)
+        overflow_mask = pto.vcmp(r_plus_y, scalar_vec, active_mask, pto.CmpMode.LT)
+        overflow_mask = pto.pand(overflow_mask, pto.pnot(wrap_to_zero, active_mask), active_mask)
+
+        # ge_mask: r >= y (quotient too small)
+        ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
+
+        # Select correct remainder
+        r_tmp = pto.vsel(r_pre, r_tmp, overflow_mask)
+        r_tmp = pto.vsel(r_next, r_tmp, ge_mask)
+    else:
+        # Low-precision: two-pass iterative correction (original)
+        ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
+        refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
+        r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
+        q_inc = pto.vadds(q_tmp, one, active_mask)
+        q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
+        ge_mask = pto.vcmp(r_tmp, scalar_vec, active_mask, pto.CmpMode.GE)
+        refined_r = pto.vsub(r_tmp, scalar_vec, active_mask)
+        r_tmp = pto.vsel(refined_r, r_tmp, ge_mask)
+        q_inc = pto.vadds(q_tmp, one, active_mask)
+        q_tmp = pto.vsel(q_inc, q_tmp, ge_mask)
+
     return pto.vsel(pto.vbr(zero_r), r_tmp, zero_mask)
 
 

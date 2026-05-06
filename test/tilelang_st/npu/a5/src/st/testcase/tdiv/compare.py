@@ -32,7 +32,23 @@ def main():
         golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=case["dtype"]).reshape(shape)
         output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=case["dtype"]).reshape(shape)
 
-        ok = result_cmp(golden[:vr, :vc], output[:vr, :vc], case["eps"])
+        eps = case["eps"]
+        dtype_name = case["dtype"].__name__
+
+        # Integer types: exact comparison (eps=0)
+        # Float types: tolerance comparison
+        if dtype_name in ("uint32", "int32", "uint16", "int16", "uint8", "int8"):
+            ok = np.array_equal(golden[:vr, :vc], output[:vr, :vc])
+            if not ok:
+                # Show mismatch details for debugging
+                mismatch = np.where(golden[:vr, :vc] != output[:vr, :vc])
+                print(f"[DEBUG] {case['name']}: mismatches at {len(mismatch[0])} positions")
+                if len(mismatch[0]) > 0 and len(mismatch[0]) <= 10:
+                    for i in range(len(mismatch[0])):
+                        r, c = mismatch[0][i], mismatch[1][i]
+                        print(f"  [{r},{c}] golden={golden[r,c]} output={output[r,c]}")
+        else:
+            ok = result_cmp(golden[:vr, :vc], output[:vr, :vc], eps)
         if ok:
             print(style_pass(f"[INFO] {case['name']}: compare passed"))
         else:

@@ -25,3 +25,24 @@ extern "C" __global__ AICORE void TDIV_f32_32x32(__gm__ float *a, __gm__ float *
 void LaunchTDIV_f32_32x32(float *a, float *b, float *c, void *stream) {
     TDIV_f32_32x32<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ float *)c);
 }
+
+// Case 2: ui32 16x64
+extern "C" __global__ AICORE void TDIV_ui32_16x64(__gm__ uint32_t *a, __gm__ uint32_t *b, __gm__ uint32_t *c);
+
+void LaunchTDIV_ui32_16x64(uint32_t *a, uint32_t *b, uint32_t *c, void *stream) {
+    TDIV_ui32_16x64<<<1, nullptr, stream>>>((__gm__ uint32_t *)a, (__gm__ uint32_t *)b, (__gm__ uint32_t *)c);
+}
+
+// Case 3: ui16 16x64
+extern "C" __global__ AICORE void TDIV_ui16_16x64(__gm__ uint16_t *a, __gm__ uint16_t *b, __gm__ uint16_t *c);
+
+void LaunchTDIV_ui16_16x64(uint16_t *a, uint16_t *b, uint16_t *c, void *stream) {
+    TDIV_ui16_16x64<<<1, nullptr, stream>>>((__gm__ uint16_t *)a, (__gm__ uint16_t *)b, (__gm__ uint16_t *)c);
+}
+
+// Case 4: i32 16x64
+extern "C" __global__ AICORE void TDIV_i32_16x64(__gm__ int32_t *a, __gm__ int32_t *b, __gm__ int32_t *c);
+
+void LaunchTDIV_i32_16x64(int32_t *a, int32_t *b, int32_t *c, void *stream) {
+    TDIV_i32_16x64<<<1, nullptr, stream>>>((__gm__ int32_t *)a, (__gm__ int32_t *)b, (__gm__ int32_t *)c);
+}
