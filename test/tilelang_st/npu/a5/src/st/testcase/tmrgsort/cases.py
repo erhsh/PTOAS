@@ -153,5 +153,32 @@ CASES = [
         "valid_shape": (1, 1024),
         "block_len": 256,       # float16 elements (=128 structures, larger block)
         "eps": 1e-3,
+    },
+    # Format2: multi-list merge (2-list merge)
+    {
+        "name": "f32_2list_b64_basic",
+        "dtype": np.float32,
+        "format": "multi",
+        "list_num": 2,
+        "src_cols": [128, 128],
+        "src_shape": [(1, 256), (1, 256)],
+        "dst_shape": (1, 256),
+        "valid_shape": (1, 256),
+        "topk": 128,
+        "exhausted": False,
+        "eps": 1e-6,
+    },
+    {
+        "name": "f16_2list_b64_basic",
+        "dtype": np.float16,
+        "format": "multi",
+        "list_num": 2,
+        "src_cols": [64, 64],  # 64 structures per list (match src_shape)
+        "src_shape": [(1, 256), (1, 256)],  # 256 f16 elements = 64 structures
+        "dst_shape": (1, 256),
+        "valid_shape": (1, 256),
+        "topk": 64,  # topk should match dst capacity
+        "exhausted": False,
+        "eps": 1e-3,
     }
 ]

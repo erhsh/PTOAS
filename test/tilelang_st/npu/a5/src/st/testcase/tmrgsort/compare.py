@@ -46,6 +46,46 @@ def read_value_index_pairs(filepath, dtype, count):
     return np.array(values, dtype=dtype), np.array(indices, dtype=np.uint32)
 
 
+def compare_multilist(case):
+    """Compare multi-list merge sort output.
+    
+    For multi-list format:
+    - Read input0.bin, input1.bin, etc.
+    - Read output.bin
+    - Compare top-k elements with golden.bin
+    """
+    dtype = case["dtype"]
+    list_num = case["list_num"]
+    src_cols = case["src_cols"]
+    topk = case["topk"]
+    exhausted = case.get("exhausted", False)
+    
+    # Calculate element divisor
+    if dtype == np.float16:
+        elem_divisor = 4
+    else:
+        elem_divisor = 2
+    
+    # Total structures to compare
+    total_structures = sum(src_cols)
+    
+    # Read golden output
+    golden_vals, golden_indices = read_value_index_pairs(
+        os.path.join(case["name"], "golden.bin"), dtype, total_structures
+    )
+    
+    # Read actual output
+    output_vals, output_indices = read_value_index_pairs(
+        os.path.join(case["name"], "output.bin"), dtype, total_structures
+    )
+    
+    # Compare top-k elements (only compare the valid output)
+    vals_ok = result_cmp(golden_vals[:topk], output_vals[:topk], case["eps"])
+    indices_ok = np.allclose(golden_indices[:topk], output_indices[:topk], atol=0, rtol=0)
+    
+    return vals_ok and indices_ok
+
+
 def main():
     case_filter = sys.argv[1] if len(sys.argv) > 1 else None
 
@@ -54,30 +94,45 @@ def main():
         if case_filter is not None and case["name"] != case_filter:
             continue
 
-        dtype = case["dtype"]
-        valid_shape = case["valid_shape"]
-        valid_rows, valid_cols = valid_shape
-        block_len = case["block_len"]
+        format_type = case.get("format", "single")
+        
+        if format_type == "single":
+            dtype = case["dtype"]
+            valid_shape = case["valid_shape"]
+            valid_rows, valid_cols = valid_shape
+            block_len = case["block_len"]
 
-        cols = valid_cols // 2
+            cols = valid_cols // 2
 
-        golden_vals, golden_indices = read_value_index_pairs(
-            os.path.join(case["name"], "golden.bin"), dtype, cols
-        )
-        output_vals, output_indices = read_value_index_pairs(
-            os.path.join(case["name"], "output.bin"), dtype, cols
-        )
+            golden_vals, golden_indices = read_value_index_pairs(
+                os.path.join(case["name"], "golden.bin"), dtype, cols
+            )
+            output_vals, output_indices = read_value_index_pairs(
+                os.path.join(case["name"], "output.bin"), dtype, cols
+            )
 
-        vals_ok = result_cmp(golden_vals, output_vals, case["eps"])
-        indices_ok = np.allclose(golden_indices, output_indices, atol=0, rtol=0)
+            vals_ok = result_cmp(golden_vals, output_vals, case["eps"])
+            indices_ok = np.allclose(golden_indices, output_indices, atol=0, rtol=0)
 
-        if vals_ok and indices_ok:
-            print(style_pass(f"[INFO] {case['name']}: compare passed"))
+            if vals_ok and indices_ok:
+                print(style_pass(f"[INFO] {case['name']}: compare passed"))
+            else:
+                if not vals_ok:
+                    print(style_fail(f"[ERROR] {case['name']}: values mismatch"))
+                if not indices_ok:
+                    print(style_fail(f"[ERROR] {case['name']}: indices mismatch"))
+                all_passed = False
+        
+        elif format_type == "multi":
+            ok = compare_multilist(case)
+            if ok:
+                print(style_pass(f"[INFO] {case['name']}: compare passed"))
+            else:
+                print(style_fail(f"[ERROR] {case['name']}: values or indices mismatch"))
+                all_passed = False
+        
         else:
-            if not vals_ok:
-                print(style_fail(f"[ERROR] {case['name']}: values mismatch"))
-            if not indices_ok:
-                print(style_fail(f"[ERROR] {case['name']}: indices mismatch"))
+            print(style_fail(f"[ERROR] {case['name']}: unsupported format {format_type}"))
             all_passed = False
 
     if not all_passed:

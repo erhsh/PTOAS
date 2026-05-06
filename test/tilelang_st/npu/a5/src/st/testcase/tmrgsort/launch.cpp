@@ -67,3 +67,21 @@ extern "C" __global__ AICORE void TMRGSORT_f16_single_1x1024_b256(__gm__ half *s
 void LaunchTMRGSORT_f16_single_1x1024_b256(uint16_t *src, uint16_t *dst, void *stream) {
     TMRGSORT_f16_single_1x1024_b256<<<1, nullptr, stream>>>((__gm__ half *)src, (__gm__ half *)dst);
 }
+
+// Format2: Multi-list merge sort (2-list)
+
+// Case: f32_2list_b64_basic
+// 2 sorted f32 lists, each 256 elements, output 256 elements (topk=128 structures)
+extern "C" __global__ AICORE void TMRGSORT_f32_2list_b64_basic(__gm__ float *src0, __gm__ float *src1, __gm__ float *dst);
+
+void LaunchTMRGSORT_f32_2list_b64_basic(float *src0, float *src1, float *dst, void *stream) {
+    TMRGSORT_f32_2list_b64_basic<<<1, nullptr, stream>>>((__gm__ float *)src0, (__gm__ float *)src1, (__gm__ float *)dst);
+}
+
+// Case: f16_2list_b64_basic
+// 2 sorted f16 lists, each 256 elements, output 256 elements (topk=128 structures)
+extern "C" __global__ AICORE void TMRGSORT_f16_2list_b64_basic(__gm__ half *src0, __gm__ half *src1, __gm__ half *dst);
+
+void LaunchTMRGSORT_f16_2list_b64_basic(uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream) {
+    TMRGSORT_f16_2list_b64_basic<<<1, nullptr, stream>>>((__gm__ half *)src0, (__gm__ half *)src1, (__gm__ half *)dst);
+}

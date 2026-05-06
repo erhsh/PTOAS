@@ -146,6 +146,111 @@ def gen_golden_single(case):
           f"cols={cols} list_col={list_col} block_lens={block_lens} repeat_times={repeat_times}")
 
 
+def gen_golden_multilist(case):
+    """Generate golden data for Format2 (multi-list merge sort).
+    
+    Following pto-isa gen_data.py logic for multi-list:
+    1. Generate sorted data for each input list (descending order)
+    2. Concatenate all lists and globally sort (descending)
+    3. Take top-k elements
+    4. If exhausted=true, handle special termination logic
+    
+    Each input list is pre-sorted in descending order.
+    Output is top-k merged sorted elements.
+    """
+    dtype = case["dtype"]
+    list_num = case["list_num"]
+    src_cols = case["src_cols"]  # structures per list
+    topk = case["topk"]
+    exhausted = case.get("exhausted", False)
+    
+    # Calculate actual cols (in elements) per src
+    # Each structure = (value, index) pair = 8 bytes
+    # For f32: 2 elements per structure (4 bytes value + 4 bytes index)
+    # For f16: 4 elements per structure (2 bytes value + 2 bytes padding + 4 bytes index)
+    elem_divisor = get_elem_divisor(dtype)
+    
+    # Generate sorted data for each input list
+    output_arr_list = []
+    output_idx_list = []
+    last_data = []
+    
+    total_structures = sum(src_cols)
+    
+    for i in range(list_num):
+        cols_i = src_cols[i]
+        # Generate random data for this list
+        input_arr = np.random.uniform(low=0.0, high=1.0, size=(1, cols_i)).astype(dtype)
+        idx_arr = np.arange(cols_i, dtype=np.uint32).reshape(1, cols_i)  # Reshape to match input_arr
+        
+        # Sort in descending order
+        sorted_indices = np.argsort(-input_arr, kind='stable', axis=1)
+        sorted_input = np.take_along_axis(input_arr, sorted_indices, axis=1)
+        sorted_idx = np.take_along_axis(idx_arr, sorted_indices, axis=1)
+        
+        # Flatten
+        flat_input_i = sorted_input.flatten()
+        flat_idx_i = sorted_idx.flatten()
+        
+        output_arr_list.append(flat_input_i)
+        output_idx_list.append(flat_idx_i)
+        
+        # Track last element for exhausted case
+        if cols_i > 0:
+            last_data.append(flat_input_i[-1])
+        else:
+            last_data.append(0)
+    
+    # Concatenate and globally sort (descending)
+    flat_input_group = np.concatenate(output_arr_list).flatten()
+    flat_idx_group = np.concatenate(output_idx_list).flatten()
+    
+    sorted_indices_global = np.argsort(-flat_input_group, kind='stable')
+    sorted_output_global = flat_input_group[sorted_indices_global]
+    sorted_idx_global = flat_idx_group[sorted_indices_global]
+    
+    # Take top-k
+    topk_sorted_output = sorted_output_global[:topk]
+    topk_sorted_idx = sorted_idx_global[:topk]
+    
+    # Pad zeros if needed
+    zeros_output = np.zeros(total_structures - topk, dtype=topk_sorted_output.dtype)
+    zeros_index = np.zeros(total_structures - topk, dtype=np.uint32)
+    topk_sorted_output_global = np.concatenate((topk_sorted_output, zeros_output))
+    topk_sorted_idx_global = np.concatenate((topk_sorted_idx, zeros_index))
+    
+    # Handle exhausted case: zero elements after last_data occurrence
+    if exhausted and list_num <= 4:
+        for i in range(list_num):
+            # Find last_data in output and zero elements after it
+            zero_index = -1
+            for j in range(len(topk_sorted_output_global) - 1, -1, -1):
+                if topk_sorted_output_global[j] == last_data[i]:
+                    zero_index = j
+                    break
+            if zero_index >= 0:
+                # Zero elements after this index in both output and index arrays
+                for j in range(zero_index + 1, len(topk_sorted_output_global)):
+                    topk_sorted_output_global[j] = 0
+                    topk_sorted_idx_global[j] = 0
+    
+    # Write input files (input0.bin, input1.bin, etc.)
+    os.makedirs(case["name"], exist_ok=True)
+    for i in range(list_num):
+        input_file = os.path.join(case["name"], f"input{i}.bin")
+        with open(input_file, 'wb') as f:
+            for val, idx in zip(output_arr_list[i], output_idx_list[i]):
+                write_value_index_pair(f, val, idx, dtype)
+    
+    # Write golden output file
+    with open(os.path.join(case["name"], "golden.bin"), 'wb') as f:
+        for val, idx in zip(topk_sorted_output_global, topk_sorted_idx_global):
+            write_value_index_pair(f, val, idx, dtype)
+    
+    print(f"[INFO] gen_data: {case['name']} list_num={list_num} "
+          f"src_cols={src_cols} total_structures={total_structures} topk={topk} exhausted={exhausted}")
+
+
 def gen_golden_data():
     """Generate golden data for all cases."""
     for case in CASES:
@@ -154,6 +259,8 @@ def gen_golden_data():
         format_type = case.get("format", "single")
         if format_type == "single":
             gen_golden_single(case)
+        elif format_type == "multi":
+            gen_golden_multilist(case)
         else:
             print(f"[WARN] Unsupported format: {format_type} for case {case['name']}")
 

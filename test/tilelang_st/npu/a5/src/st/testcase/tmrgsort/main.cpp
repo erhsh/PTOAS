@@ -31,13 +31,22 @@ void LaunchTMRGSORT_f16_single_1x320_b64(uint16_t *src, uint16_t *dst, void *str
 void LaunchTMRGSORT_f16_single_1x512_b64(uint16_t *src, uint16_t *dst, void *stream);
 void LaunchTMRGSORT_f16_single_1x1024_b256(uint16_t *src, uint16_t *dst, void *stream);
 
+// Multi-list launch wrappers
+void LaunchTMRGSORT_f32_2list_b64_basic(float *src0, float *src1, float *dst, void *stream);
+void LaunchTMRGSORT_f16_2list_b64_basic(uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream);
+
 using LaunchFn = void (*)(void *, void *, void *);
+using LaunchFn2 = void (*)(void *, void *, void *, void *);
 
 struct TestCase {
     const char *name;
-    LaunchFn    launch;
+    int         listNum;    // 1 for single-list, 2/3/4 for multi-list
+    LaunchFn    launch;     // for single-list
+    LaunchFn2   launch2;    // for 2-list
     size_t      srcRows;
-    size_t      srcCols;
+    size_t      srcCols;    // for single-list
+    size_t      srcCols0;   // for multi-list: src0 cols
+    size_t      srcCols1;   // for multi-list: src1 cols
     size_t      dstRows;
     size_t      dstCols;
     size_t      elemSize;    // bytes per element
@@ -45,72 +54,148 @@ struct TestCase {
 };
 
 static const TestCase kCases[] = {
-    {"f32_single_1x256_b64",   reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f32_single_1x256_b64),   1, 256,  1, 256,  sizeof(float),    8},
-    {"f32_single_1x320_b64",   reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f32_single_1x320_b64),   1, 320,  1, 320,  sizeof(float),    8},
-    {"f32_single_1x512_b64",   reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f32_single_1x512_b64),   1, 512,  1, 512,  sizeof(float),    8},
-    {"f32_single_1x640_b64",   reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f32_single_1x640_b64),   1, 640,  1, 640,  sizeof(float),    8},
-    {"f16_single_1x256_b64",   reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f16_single_1x256_b64),   1, 256,  1, 256,  sizeof(uint16_t), 8},
-    {"f16_single_1x320_b64",   reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f16_single_1x320_b64),   1, 320,  1, 320,  sizeof(uint16_t), 8},
-    {"f16_single_1x512_b64",   reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f16_single_1x512_b64),   1, 512,  1, 512,  sizeof(uint16_t), 8},
-    {"f16_single_1x1024_b256", reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f16_single_1x1024_b256), 1, 1024, 1, 1024, sizeof(uint16_t), 8},
+    // Single-list cases (Format1)
+    {"f32_single_1x256_b64",   1, reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f32_single_1x256_b64),   nullptr, 1, 256,  0, 0, 1, 256,  sizeof(float),    8},
+    {"f32_single_1x320_b64",   1, reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f32_single_1x320_b64),   nullptr, 1, 320,  0, 0, 1, 320,  sizeof(float),    8},
+    {"f32_single_1x512_b64",   1, reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f32_single_1x512_b64),   nullptr, 1, 512,  0, 0, 1, 512,  sizeof(float),    8},
+    {"f32_single_1x640_b64",   1, reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f32_single_1x640_b64),   nullptr, 1, 640,  0, 0, 1, 640,  sizeof(float),    8},
+    {"f16_single_1x256_b64",   1, reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f16_single_1x256_b64),   nullptr, 1, 256,  0, 0, 1, 256,  sizeof(uint16_t), 8},
+    {"f16_single_1x320_b64",   1, reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f16_single_1x320_b64),   nullptr, 1, 320,  0, 0, 1, 320,  sizeof(uint16_t), 8},
+    {"f16_single_1x512_b64",   1, reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f16_single_1x512_b64),   nullptr, 1, 512,  0, 0, 1, 512,  sizeof(uint16_t), 8},
+    {"f16_single_1x1024_b256", 1, reinterpret_cast<LaunchFn>(LaunchTMRGSORT_f16_single_1x1024_b256), nullptr, 1, 1024, 0, 0, 1, 1024, sizeof(uint16_t), 8},
+    
+    // Multi-list cases (Format2)
+    {"f32_2list_b64_basic",    2, nullptr, reinterpret_cast<LaunchFn2>(LaunchTMRGSORT_f32_2list_b64_basic),  1, 0,   256, 256, 1, 256, sizeof(float),    8},
+    {"f16_2list_b64_basic",    2, nullptr, reinterpret_cast<LaunchFn2>(LaunchTMRGSORT_f16_2list_b64_basic),  1, 0,   256, 256, 1, 256, sizeof(uint16_t), 8},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
 static int RunCase(const TestCase &tc, aclrtStream stream) {
     int rc = 0;
-    // srcCols/dstCols are in FLOAT ELEMENTS, need to convert to STRUCTURE count
-    // Each structure = (value, index) pair = 2 float elements
-    size_t srcStructs = tc.srcCols / 2;
-    size_t dstStructs = tc.dstCols / 2;
-    
-    // File sizes in bytes
-    size_t srcFileSize = tc.srcRows * srcStructs * tc.structSize;
-    size_t dstFileSize = tc.dstRows * dstStructs * tc.structSize;
-
-    std::printf("[INFO] === case: %s (src=%zux%zu, dst=%zux%zu) ===\n",
-                tc.name, tc.srcRows, tc.srcCols, tc.dstRows, tc.dstCols);
-
     std::string caseDir = std::string("./") + tc.name;
+    
+    // Single-list case (Format1)
+    if (tc.listNum == 1) {
+        // srcCols/dstCols are in FLOAT ELEMENTS, need to convert to STRUCTURE count
+        // Each structure = (value, index) pair = 2 float elements
+        size_t srcStructs = tc.srcCols / 2;
+        size_t dstStructs = tc.dstCols / 2;
+        
+        // File sizes in bytes
+        size_t srcFileSize = tc.srcRows * srcStructs * tc.structSize;
+        size_t dstFileSize = tc.dstRows * dstStructs * tc.structSize;
 
-    void *srcHost = nullptr, *dstHost = nullptr;
-    void *srcDevice = nullptr, *dstDevice = nullptr;
+        std::printf("[INFO] === case: %s (src=%zux%zu, dst=%zux%zu) ===\n",
+                    tc.name, tc.srcRows, tc.srcCols, tc.dstRows, tc.dstCols);
 
-    aclrtMallocHost((void **)(&srcHost), srcFileSize);
-    aclrtMallocHost((void **)(&dstHost), dstFileSize);
+        void *srcHost = nullptr, *dstHost = nullptr;
+        void *srcDevice = nullptr, *dstDevice = nullptr;
 
-    aclrtMalloc((void **)&srcDevice, srcFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&dstDevice, dstFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMallocHost((void **)(&srcHost), srcFileSize);
+        aclrtMallocHost((void **)(&dstHost), dstFileSize);
 
-    if (!ReadFile((caseDir + "/input0.bin").c_str(), srcFileSize, srcHost, srcFileSize)) {
-        std::fprintf(stderr, "[ERROR] failed to read %s/input0.bin\n", caseDir.c_str());
+        aclrtMalloc((void **)&srcDevice, srcFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMalloc((void **)&dstDevice, dstFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+
+        if (!ReadFile((caseDir + "/input0.bin").c_str(), srcFileSize, srcHost, srcFileSize)) {
+            std::fprintf(stderr, "[ERROR] failed to read %s/input0.bin\n", caseDir.c_str());
+            rc = 1;
+        }
+
+        if (rc == 0) {
+            aclrtMemcpy(srcDevice, srcFileSize, srcHost, srcFileSize, ACL_MEMCPY_HOST_TO_DEVICE);
+
+            tc.launch(srcDevice, dstDevice, stream);
+
+            aclrtSynchronizeStream(stream);
+            aclrtMemcpy(dstHost, dstFileSize, dstDevice, dstFileSize, ACL_MEMCPY_DEVICE_TO_HOST);
+        }
+
+        if (rc == 0 && !WriteFile((caseDir + "/output.bin").c_str(), dstHost, dstFileSize)) {
+            std::fprintf(stderr, "[ERROR] failed to write %s/output.bin\n", caseDir.c_str());
+            rc = 1;
+        }
+
+        if (srcDevice != nullptr)
+            aclrtFree(srcDevice);
+        if (dstDevice != nullptr)
+            aclrtFree(dstDevice);
+        if (srcHost != nullptr)
+            aclrtFreeHost(srcHost);
+        if (dstHost != nullptr)
+            aclrtFreeHost(dstHost);
+
+        if (rc == 0)
+            std::printf("[INFO] case %s done\n", tc.name);
+    }
+    
+    // Multi-list case (Format2)
+    else if (tc.listNum == 2) {
+        // For 2-list: src0, src1, dst
+        // srcCols0, srcCols1 are in ELEMENTS, dstCols in ELEMENTS
+        size_t src0Structs = tc.srcCols0 / 2;
+        size_t src1Structs = tc.srcCols1 / 2;
+        size_t dstStructs = tc.dstCols / 2;
+        
+        size_t src0FileSize = tc.srcRows * src0Structs * tc.structSize;
+        size_t src1FileSize = tc.srcRows * src1Structs * tc.structSize;
+        size_t dstFileSize = tc.dstRows * dstStructs * tc.structSize;
+        
+        std::printf("[INFO] === case: %s (src0=%zux%zu, src1=%zux%zu, dst=%zux%zu) ===\n",
+                    tc.name, tc.srcRows, tc.srcCols0, tc.srcRows, tc.srcCols1, tc.dstRows, tc.dstCols);
+        
+        void *src0Host = nullptr, *src1Host = nullptr, *dstHost = nullptr;
+        void *src0Device = nullptr, *src1Device = nullptr, *dstDevice = nullptr;
+        
+        aclrtMallocHost((void **)(&src0Host), src0FileSize);
+        aclrtMallocHost((void **)(&src1Host), src1FileSize);
+        aclrtMallocHost((void **)(&dstHost), dstFileSize);
+        
+        aclrtMalloc((void **)&src0Device, src0FileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMalloc((void **)&src1Device, src1FileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMalloc((void **)&dstDevice, dstFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+        
+        // Read input0.bin and input1.bin
+        if (!ReadFile((caseDir + "/input0.bin").c_str(), src0FileSize, src0Host, src0FileSize)) {
+            std::fprintf(stderr, "[ERROR] failed to read %s/input0.bin\n", caseDir.c_str());
+            rc = 1;
+        }
+        if (rc == 0 && !ReadFile((caseDir + "/input1.bin").c_str(), src1FileSize, src1Host, src1FileSize)) {
+            std::fprintf(stderr, "[ERROR] failed to read %s/input1.bin\n", caseDir.c_str());
+            rc = 1;
+        }
+        
+        if (rc == 0) {
+            aclrtMemcpy(src0Device, src0FileSize, src0Host, src0FileSize, ACL_MEMCPY_HOST_TO_DEVICE);
+            aclrtMemcpy(src1Device, src1FileSize, src1Host, src1FileSize, ACL_MEMCPY_HOST_TO_DEVICE);
+            
+            tc.launch2(src0Device, src1Device, dstDevice, stream);
+            
+            aclrtSynchronizeStream(stream);
+            aclrtMemcpy(dstHost, dstFileSize, dstDevice, dstFileSize, ACL_MEMCPY_DEVICE_TO_HOST);
+        }
+        
+        if (rc == 0 && !WriteFile((caseDir + "/output.bin").c_str(), dstHost, dstFileSize)) {
+            std::fprintf(stderr, "[ERROR] failed to write %s/output.bin\n", caseDir.c_str());
+            rc = 1;
+        }
+        
+        if (src0Device != nullptr) aclrtFree(src0Device);
+        if (src1Device != nullptr) aclrtFree(src1Device);
+        if (dstDevice != nullptr)  aclrtFree(dstDevice);
+        if (src0Host != nullptr)   aclrtFreeHost(src0Host);
+        if (src1Host != nullptr)   aclrtFreeHost(src1Host);
+        if (dstHost != nullptr)    aclrtFreeHost(dstHost);
+        
+        if (rc == 0)
+            std::printf("[INFO] case %s done\n", tc.name);
+    }
+    
+    else {
+        std::fprintf(stderr, "[ERROR] Unsupported listNum=%d for case %s\n", tc.listNum, tc.name);
         rc = 1;
     }
-
-    if (rc == 0) {
-        aclrtMemcpy(srcDevice, srcFileSize, srcHost, srcFileSize, ACL_MEMCPY_HOST_TO_DEVICE);
-
-        tc.launch(srcDevice, dstDevice, stream);
-
-        aclrtSynchronizeStream(stream);
-        aclrtMemcpy(dstHost, dstFileSize, dstDevice, dstFileSize, ACL_MEMCPY_DEVICE_TO_HOST);
-    }
-
-    if (rc == 0 && !WriteFile((caseDir + "/output.bin").c_str(), dstHost, dstFileSize)) {
-        std::fprintf(stderr, "[ERROR] failed to write %s/output.bin\n", caseDir.c_str());
-        rc = 1;
-    }
-
-    if (srcDevice != nullptr)
-        aclrtFree(srcDevice);
-    if (dstDevice != nullptr)
-        aclrtFree(dstDevice);
-    if (srcHost != nullptr)
-        aclrtFreeHost(srcHost);
-    if (dstHost != nullptr)
-        aclrtFreeHost(dstHost);
-
-    if (rc == 0)
-        std::printf("[INFO] case %s done\n", tc.name);
+    
     return rc;
 }
 
