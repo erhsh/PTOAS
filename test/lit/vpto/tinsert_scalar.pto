@@ -1,0 +1,40 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the software repository for the full text of the License.
+
+// Test pto.tinsert (Vec→Vec ND) scalar path: valid_shape = [1, 1].
+// NOTE: load_scalar/store_scalar currently lower to plain LLVM Load/Store
+// which accesses DDR, not UB — this lit test verifies IR generation only.
+// f32, src shape 8x8 valid_shape 1x1 → dst 16x8
+//
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --enable-tile-op-expand %s -o - 2>/dev/null | FileCheck %s
+
+// CHECK: func.func @TINSERT_SCALAR
+// CHECK-NOT: pto.tinsert ins
+// CHECK: pto.load_scalar
+// CHECK: pto.store_scalar
+
+module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @TINSERT_SCALAR() {
+    %c0 = arith.constant 0 : index
+    %c4 = arith.constant 4 : index
+
+    %src = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=8, v_row=1, v_col=1,
+                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=8, v_row=16, v_col=8,
+                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tinsert ins(%src, %c4, %c0 : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=8, v_row=1, v_col=1,
+                              blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+                          index, index)
+             outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=8, v_row=16, v_col=8,
+                           blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}

@@ -194,6 +194,8 @@ set(ALL_TESTCASES
     tfmods
     tcmps
     tmatmul
+    tinsert
+    tinsert_acc
 )
 
 if((TEST_CASE IN_LIST ALL_TESTCASES) OR (TEST_CASE STREQUAL "all"))
