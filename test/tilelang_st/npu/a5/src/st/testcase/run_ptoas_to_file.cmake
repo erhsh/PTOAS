@@ -47,14 +47,27 @@ execute_process(
 
 if(NOT PTOAS_RESULT EQUAL 0)
     string(STRIP "${PTOAS_STDERR}" PTOAS_STDERR)
+    set(_PTOAS_CONTEXT
+        "  PTO_SRC       = ${PTO_SRC}\n"
+        "  KERNEL_FATOBJ = ${KERNEL_FATOBJ}\n"
+        "  PTO_LEVEL     = ${PTOAS_PTO_LEVEL}\n"
+        "  PTOAS_CMD     = ${PTOAS_COMMAND}")
     if(PTOAS_STDERR)
-        message(FATAL_ERROR "ptoas failed while generating ${KERNEL_FATOBJ}:\n${PTOAS_STDERR}")
+        message(FATAL_ERROR
+            "ptoas failed while generating ${KERNEL_FATOBJ}:\n"
+            "Configuration:\n${_PTOAS_CONTEXT}\n"
+            "stderr:\n${PTOAS_STDERR}")
     endif()
-    message(FATAL_ERROR "ptoas failed while generating ${KERNEL_FATOBJ}")
+    message(FATAL_ERROR
+        "ptoas failed while generating ${KERNEL_FATOBJ}\n"
+        "Configuration:\n${_PTOAS_CONTEXT}")
 endif()
 
 if(NOT EXISTS "${KERNEL_FATOBJ}")
-    message(FATAL_ERROR "ptoas completed without producing ${KERNEL_FATOBJ}")
+    message(FATAL_ERROR
+        "ptoas completed without producing ${KERNEL_FATOBJ}\n"
+        "  PTO_SRC = ${PTO_SRC}\n"
+        "  PTOAS_CMD = ${PTOAS_COMMAND}")
 endif()
 
 file(SIZE "${KERNEL_FATOBJ}" KERNEL_FATOBJ_SIZE)
@@ -63,7 +76,11 @@ if(KERNEL_FATOBJ_SIZE EQUAL 0)
     string(STRIP "${PTOAS_STDERR}" PTOAS_STDERR)
     if(PTOAS_STDERR)
         message(FATAL_ERROR
-            "ptoas produced empty fatobj for ${PTO_SRC}:\n${PTOAS_STDERR}")
+            "ptoas produced empty fatobj for ${PTO_SRC}:\n"
+            "  PTOAS_CMD = ${PTOAS_COMMAND}\n"
+            "${PTOAS_STDERR}")
     endif()
-    message(FATAL_ERROR "ptoas produced empty fatobj for ${PTO_SRC}")
+    message(FATAL_ERROR
+        "ptoas produced empty fatobj for ${PTO_SRC}\n"
+        "  PTOAS_CMD = ${PTOAS_COMMAND}")
 endif()
