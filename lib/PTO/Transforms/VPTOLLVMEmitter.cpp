@@ -9759,6 +9759,31 @@ emitDeviceLLVMModule(ModuleOp deviceModule, StringRef kernelKind,
   if (failed(applyQueriedTargetAttrs(deviceModule, options, diagOS)))
     return failure();
 
+  // Diagnostic: detect residual pto.alloc_tile before LLVM translation.
+  // If any are found, dump the device module and abort early so we can
+  // pinpoint exactly what the translation entry point sees.
+  {
+    bool foundResidual = false;
+    deviceModule.walk([&](pto::AllocTileOp allocTile) {
+      auto parentFunc = allocTile->getParentOfType<func::FuncOp>();
+      allocTile->emitError("residual pto.alloc_tile in ")
+          << kernelKind << " module before LLVM translation"
+          << (parentFunc
+                  ? (Twine(" (in function '") +
+                     parentFunc.getSymName() + "')")
+                        .str()
+                  : std::string());
+      foundResidual = true;
+    });
+    if (foundResidual) {
+      diagOS << "=== " << kernelKind
+             << " device module before translateModuleToLLVMIR ===\n";
+      deviceModule->print(diagOS);
+      diagOS << "\n=== end " << kernelKind << " module dump ===\n";
+      return failure();
+    }
+  }
+
   auto llvmContext = std::make_unique<llvm::LLVMContext>();
   registerBuiltinDialectTranslation(*deviceModule.getContext());
   registerLLVMDialectTranslation(*deviceModule.getContext());
@@ -9767,6 +9792,10 @@ emitDeviceLLVMModule(ModuleOp deviceModule, StringRef kernelKind,
   if (!llvmModule) {
     diagOS << "VPTO LLVM emission failed: LLVM IR export failed for "
            << kernelKind << " module\n";
+    diagOS << "=== " << kernelKind
+           << " device module after translateModuleToLLVMIR returned null ===\n";
+    deviceModule->print(diagOS);
+    diagOS << "\n=== end " << kernelKind << " module dump ===\n";
     return failure();
   }
 
