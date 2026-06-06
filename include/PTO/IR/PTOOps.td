@@ -4313,11 +4313,6 @@ def TInsertOp : PTO_TOp<"tinsert", [
           sOpt.value() == ::mlir::pto::AddressSpace::VEC &&
           dOpt.value() == ::mlir::pto::AddressSpace::MAT)
         return ::mlir::pto::PIPE::PIPE_MTE3;
-      if (sOpt.has_value() && dOpt.has_value() &&
-          sOpt.value() == ::mlir::pto::AddressSpace::ACC &&
-          (dOpt.value() == ::mlir::pto::AddressSpace::MAT ||
-           dOpt.value() == ::mlir::pto::AddressSpace::VEC))
-        return ::mlir::pto::PIPE::PIPE_FIX;
 
       // Default and Acc->Mat path.
       return ::mlir::pto::PIPE::PIPE_FIX;
