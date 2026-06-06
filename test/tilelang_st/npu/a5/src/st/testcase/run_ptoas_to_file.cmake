@@ -52,23 +52,11 @@ if(NOT PTOAS_RESULT EQUAL 0)
         "  KERNEL_FATOBJ = ${KERNEL_FATOBJ}\n"
         "  PTO_LEVEL     = ${PTOAS_PTO_LEVEL}\n"
         "  PTOAS_CMD     = ${PTOAS_COMMAND}")
-    
-    # Dump IR after all passes to help debug alloc_tile residuals
-    set(_PTOAS_IR_DUMP_CMD ${PTOAS_COMMAND} --mlir-print-ir-after-all)
-    execute_process(
-        COMMAND ${_PTOAS_IR_DUMP_CMD}
-        RESULT_VARIABLE _PTOAS_IR_DUMP_RESULT
-        OUTPUT_VARIABLE _PTOAS_IR_DUMP_OUT
-        ERROR_VARIABLE _PTOAS_IR_DUMP_ERR
-    )
-    
     if(PTOAS_STDERR)
         message(FATAL_ERROR
             "ptoas failed while generating ${KERNEL_FATOBJ}:\n"
             "Configuration:\n${_PTOAS_CONTEXT}\n"
-            "stderr:\n${PTOAS_STDERR}\n"
-            "=== IR Dump (from --mlir-print-ir-after-all) ===\n"
-            "${_PTOAS_IR_DUMP_OUT}\n${_PTOAS_IR_DUMP_ERR}")
+            "stderr:\n${PTOAS_STDERR}")
     endif()
     message(FATAL_ERROR
         "ptoas failed while generating ${KERNEL_FATOBJ}\n"
