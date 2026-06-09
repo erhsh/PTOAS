@@ -6317,6 +6317,11 @@ static bool isColMajorRowMajorNZTileBuf(pto::TileBufType ty) {
          ty.getSLayoutValueI32() == static_cast<int32_t>(pto::SLayout::RowMajor);
 }
 
+static bool isRowMajorNoneBoxNDTileBuf(pto::TileBufType ty) {
+  return ty.getBLayoutValueI32() == static_cast<int32_t>(pto::BLayout::RowMajor) &&
+         ty.getSLayoutValueI32() == static_cast<int32_t>(pto::SLayout::NoneBox);
+}
+
 static bool isA2A3VectorPreQuantTypePair(Type srcElem, Type dstElem) {
   if (srcElem.isF32())
     return dstElem.isInteger(8);
@@ -6493,6 +6498,9 @@ mlir::LogicalResult mlir::pto::TInsertFPOp::verify() {
       return emitOpError("expects src to use blayout=col_major and slayout=row_major");
     if (*dstSpace == pto::AddressSpace::MAT && !isColMajorRowMajorNZTileBuf(dstTb))
       return emitOpError("expects dst (mat) to use blayout=col_major and slayout=row_major");
+    if (*dstSpace == pto::AddressSpace::VEC &&
+        !isRowMajorNoneBoxNDTileBuf(dstTb) && !isColMajorRowMajorNZTileBuf(dstTb))
+      return emitOpError("expects dst (vec) to use ND(row_major/none_box) or NZ(col_major/row_major) layout");
     // accToVecMode is only valid when dst=vec.
     if (static_cast<bool>(getAccToVecModeAttr()) &&
         *dstSpace != pto::AddressSpace::VEC)

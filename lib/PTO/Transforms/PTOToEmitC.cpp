@@ -8697,10 +8697,10 @@ struct PTOInsertToEmitC : public OpConversionPattern<pto::TInsertOp> {
 
     auto accToVecModeTok = [&](pto::AccToVecMode mode) -> StringRef {
       switch (mode) {
-      case pto::AccToVecMode::SingleModeVec0: return "pto::AccToVecMode::SingleModeVec0";
-      case pto::AccToVecMode::SingleModeVec1: return "pto::AccToVecMode::SingleModeVec1";
-      case pto::AccToVecMode::DualModeSplitM: return "pto::AccToVecMode::DualModeSplitM";
-      case pto::AccToVecMode::DualModeSplitN: return "pto::AccToVecMode::DualModeSplitN";
+      case pto::AccToVecMode::SingleModeVec0: return "AccToVecMode::SingleModeVec0";
+      case pto::AccToVecMode::SingleModeVec1: return "AccToVecMode::SingleModeVec1";
+      case pto::AccToVecMode::DualModeSplitM: return "AccToVecMode::DualModeSplitM";
+      case pto::AccToVecMode::DualModeSplitN: return "AccToVecMode::DualModeSplitN";
       }
       llvm_unreachable("unknown AccToVecMode");
     };
@@ -8778,6 +8778,7 @@ struct PTOInsertFPToEmitC : public OpConversionPattern<pto::TInsertFPOp> {
   LogicalResult matchAndRewrite(pto::TInsertFPOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
+    auto *ctx = rewriter.getContext();
 
     Value src = peelUnrealized(adaptor.getSrc());
     Value fp = peelUnrealized(adaptor.getFp());
@@ -8785,9 +8786,57 @@ struct PTOInsertFPToEmitC : public OpConversionPattern<pto::TInsertFPOp> {
     Value r0 = peelUnrealized(adaptor.getIndexRow());
     Value c0 = peelUnrealized(adaptor.getIndexCol());
 
+    auto accToVecModeAttr = op.getAccToVecModeAttr();
+    const bool hasAccToVecMode = static_cast<bool>(accToVecModeAttr);
+    const bool reluNonDefault = op.getReluPreMode() != pto::ReluPreMode::NoRelu;
+    const bool needTemplateArgs = hasAccToVecMode || reluNonDefault;
+
+    ArrayAttr templateArgs = ArrayAttr{};
+    if (needTemplateArgs) {
+      auto dstOT = mlir::dyn_cast<emitc::OpaqueType>(dst.getType());
+      auto srcOT = mlir::dyn_cast<emitc::OpaqueType>(src.getType());
+      auto fpOT = mlir::dyn_cast<emitc::OpaqueType>(fp.getType());
+      if (!dstOT || !srcOT || !fpOT)
+        return rewriter.notifyMatchFailure(
+            op, "tinsert_fp lowering expects opaque dst/src/fp types");
+
+      auto reluTok = [&](pto::ReluPreMode mode) -> StringRef {
+        switch (mode) {
+        case pto::ReluPreMode::NoRelu:     return "ReluPreMode::NoRelu";
+        case pto::ReluPreMode::NormalRelu: return "ReluPreMode::NormalRelu";
+        case pto::ReluPreMode::ScalarRelu: return "ReluPreMode::ScalarRelu";
+        case pto::ReluPreMode::VectorRelu: return "ReluPreMode::VectorRelu";
+        case pto::ReluPreMode::Pwl:        return "ReluPreMode::Pwl";
+        }
+        llvm_unreachable("unknown ReluPreMode");
+      };
+
+      auto accToVecModeTok = [&](pto::AccToVecMode mode) -> StringRef {
+        switch (mode) {
+        case pto::AccToVecMode::SingleModeVec0: return "AccToVecMode::SingleModeVec0";
+        case pto::AccToVecMode::SingleModeVec1: return "AccToVecMode::SingleModeVec1";
+        case pto::AccToVecMode::DualModeSplitM: return "AccToVecMode::DualModeSplitM";
+        case pto::AccToVecMode::DualModeSplitN: return "AccToVecMode::DualModeSplitN";
+        }
+        llvm_unreachable("unknown AccToVecMode");
+      };
+
+      SmallVector<Attribute, 5> templateArgVec;
+      templateArgVec.push_back(emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()));
+      templateArgVec.push_back(emitc::OpaqueAttr::get(ctx, srcOT.getValue().str()));
+      templateArgVec.push_back(emitc::OpaqueAttr::get(ctx, fpOT.getValue().str()));
+      if (hasAccToVecMode)
+        templateArgVec.push_back(
+            emitc::OpaqueAttr::get(ctx, accToVecModeTok(accToVecModeAttr.getValue())));
+      if (reluNonDefault)
+        templateArgVec.push_back(
+            emitc::OpaqueAttr::get(ctx, reluTok(op.getReluPreMode())));
+      templateArgs = rewriter.getArrayAttr(templateArgVec);
+    }
+
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TINSERT_FP",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+        /*args=*/ArrayAttr{}, /*templateArgs=*/templateArgs,
         /*operands=*/ValueRange{dst, src, fp, r0, c0});
 
     rewriter.eraseOp(op);

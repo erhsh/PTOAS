@@ -211,7 +211,7 @@ def template_tinsert_acc_to_mat(
     dst_ptr = pto.addptr(dst_ptr, dst_offset)
 
     dst_stride = dst_rows * c0_size * elem_bytes
-    src_stride = src.shape[0] * elem_bytes
+    src_stride = src.shape[0] * pto.bytewidth(src_elem)
 
     relu_mode_name = pto.get_op_attr("relu_pre_mode", "no_relu")
     has_fp = fp is not None
@@ -278,6 +278,7 @@ def template_tinsert_acc_to_mat_basic(
     src_ptr = src.as_ptr()
     dst_ptr = dst.as_ptr()
 
+    src_elem = src.element_type
     dst_elem = dst.element_type
     elem_bytes = pto.bytewidth(dst_elem)
     c0_standard = BLOCK_BYTE_SIZE // elem_bytes
@@ -298,7 +299,7 @@ def template_tinsert_acc_to_mat_basic(
     dst_ptr = pto.addptr(dst_ptr, dst_offset)
 
     dst_stride = dst_rows * c0_size * elem_bytes
-    src_stride = src.shape[0] * elem_bytes
+    src_stride = src.shape[0] * pto.bytewidth(src_elem)
 
     relu_mode_name = pto.get_op_attr("relu_pre_mode", "no_relu")
 
@@ -359,7 +360,7 @@ def template_tinsert_acc_to_vec_nd(
     dst_ptr = pto.addptr(dst_ptr, dst_offset)
 
     dst_stride = dst_cols * elem_bytes
-    src_stride = (valid_rows + 15) // 16 * 16 * elem_bytes
+    src_stride = (valid_rows + 15) // 16 * 16 * pto.bytewidth(src_elem)
 
     relu_mode_name = pto.get_op_attr("relu_pre_mode", "no_relu")
     acc_mode_name = pto.get_op_attr("acc_to_vec_mode", "single_mode_vec0")
@@ -374,9 +375,7 @@ def template_tinsert_acc_to_vec_nd(
     elif pto.constexpr(acc_mode_name == "dual_mode_split_n"):
         dst_mode = "split_n"
 
-    supports_pre_quant = acc_mode_name not in ("dual_mode_split_m", "dual_mode_split_n")
-
-    if pto.constexpr(has_fp and supports_pre_quant):
+    if pto.constexpr(has_fp):
         if pto.constexpr(relu_mode_name == "normal_relu"):
             pto.mte_l0c_ub(
                 src_ptr, dst_ptr,
@@ -392,7 +391,7 @@ def template_tinsert_acc_to_vec_nd(
                 layout="nz2nd",
                 pre_quant=(fp, _pre_quant_vec_mode(src_elem, dst_elem)),
             )
-    elif pto.constexpr(has_scalar and supports_pre_quant):
+    elif pto.constexpr(has_scalar):
         if pto.constexpr(relu_mode_name == "normal_relu"):
             pto.mte_l0c_ub(
                 src_ptr, dst_ptr,
@@ -444,6 +443,7 @@ def template_tinsert_acc_to_vec_nd_basic(
     src_ptr = src.as_ptr()
     dst_ptr = dst.as_ptr()
 
+    src_elem = src.element_type
     elem_bytes = pto.bytewidth(dst.element_type)
     c0_size = 32 // elem_bytes
 
@@ -456,7 +456,7 @@ def template_tinsert_acc_to_vec_nd_basic(
     dst_ptr = pto.addptr(dst_ptr, dst_offset)
 
     dst_stride = dst_cols * elem_bytes
-    src_stride = (valid_rows + 15) // 16 * 16 * elem_bytes
+    src_stride = (valid_rows + 15) // 16 * 16 * pto.bytewidth(src_elem)
 
     relu_mode_name = pto.get_op_attr("relu_pre_mode", "no_relu")
     acc_mode_name = pto.get_op_attr("acc_to_vec_mode", "single_mode_vec0")
@@ -528,7 +528,7 @@ def template_tinsert_acc_to_vec_dn(
     dst_ptr = pto.addptr(dst_ptr, dst_offset)
 
     dst_stride = dst_rows * elem_bytes
-    src_stride = (valid_rows + 15) // 16 * 16 * elem_bytes
+    src_stride = (valid_rows + 15) // 16 * 16 * pto.bytewidth(src_elem)
 
     relu_mode_name = pto.get_op_attr("relu_pre_mode", "no_relu")
     acc_mode_name = pto.get_op_attr("acc_to_vec_mode", "single_mode_vec0")
@@ -607,6 +607,7 @@ def template_tinsert_acc_to_vec_dn_basic(
     src_ptr = src.as_ptr()
     dst_ptr = dst.as_ptr()
 
+    src_elem = src.element_type
     elem_bytes = pto.bytewidth(dst.element_type)
     c0_size = 32 // elem_bytes
 
@@ -619,7 +620,7 @@ def template_tinsert_acc_to_vec_dn_basic(
     dst_ptr = pto.addptr(dst_ptr, dst_offset)
 
     dst_stride = dst_rows * elem_bytes
-    src_stride = (valid_rows + 15) // 16 * 16 * elem_bytes
+    src_stride = (valid_rows + 15) // 16 * 16 * pto.bytewidth(src_elem)
 
     relu_mode_name = pto.get_op_attr("relu_pre_mode", "no_relu")
 
@@ -703,7 +704,7 @@ def template_tinsert_acc_to_vec_nz(
     dst_ptr = pto.addptr(dst_ptr, dst_offset)
 
     dst_stride = dst_rows * c0_size * elem_bytes
-    src_stride = (valid_rows + 15) // 16 * 16 * elem_bytes
+    src_stride = (valid_rows + 15) // 16 * 16 * pto.bytewidth(src_elem)
 
     relu_mode_name = pto.get_op_attr("relu_pre_mode", "no_relu")
     acc_mode_name = pto.get_op_attr("acc_to_vec_mode", "single_mode_vec0")
@@ -786,6 +787,7 @@ def template_tinsert_acc_to_vec_nz_basic(
     src_ptr = src.as_ptr()
     dst_ptr = dst.as_ptr()
 
+    src_elem = src.element_type
     dst_elem = dst.element_type
     elem_bytes = pto.bytewidth(dst_elem)
     c0_standard = BLOCK_BYTE_SIZE // elem_bytes
@@ -815,7 +817,7 @@ def template_tinsert_acc_to_vec_nz_basic(
     dst_ptr = pto.addptr(dst_ptr, dst_offset)
 
     dst_stride = dst_rows * c0_size * elem_bytes
-    src_stride = (valid_rows + 15) // 16 * 16 * elem_bytes
+    src_stride = (valid_rows + 15) // 16 * 16 * pto.bytewidth(src_elem)
 
     relu_mode_name = pto.get_op_attr("relu_pre_mode", "no_relu")
     acc_mode_name = pto.get_op_attr("acc_to_vec_mode", "single_mode_vec0")
