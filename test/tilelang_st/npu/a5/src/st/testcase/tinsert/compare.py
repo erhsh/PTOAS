@@ -41,22 +41,16 @@ def main():
             continue
 
         golden = np.fromfile(golden_path, dtype=dtype_out).astype(np.float32)
+        output = np.fromfile(output_path, dtype=dtype_out).astype(np.float32)
 
-        output = np.fromfile(output_path, dtype=np.float32)
+        if golden.size != output.size:
+            print(style_fail(
+                f"[ERROR] {case['name']}: size mismatch golden={golden.size} output={output.size}"
+            ))
+            all_passed = False
+            continue
 
-        golden_2d = golden.reshape(m, n)
-
-        if output.shape != (m, n):
-            if output.size == m * n:
-                output = output.reshape(m, n)
-            else:
-                print(style_fail(
-                    f"[ERROR] {case['name']}: size mismatch golden={golden.size} output={output.size}"
-                ))
-                all_passed = False
-                continue
-
-        ok = result_cmp(golden_2d, output, case["eps"])
+        ok = result_cmp(golden, output, case["eps"])
         if ok:
             print(style_pass(f"[INFO] {case['name']}: compare passed"))
         else:

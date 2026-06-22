@@ -205,8 +205,8 @@ def template_tinsert_acc_to_mat(
     dst_offset = dst_rows * c0_size * col_block + index_row * c0_size + col_mod
     dst_ptr = pto.addptr(dst_ptr, dst_offset)
 
-    dst_stride = dst_rows * c0_size * elem_bytes
-    src_stride = src.shape[0] * pto.bytewidth(src_elem)
+    src_stride = src.shape[0]
+    dst_stride = n_size
 
     relu_mode_name = pto.get_op_attr("relu_pre_mode", "no_relu")
     has_fp = fp is not None
@@ -288,8 +288,8 @@ def template_tinsert_acc_to_mat_basic(
     dst_offset = dst_rows * c0_size * col_block + index_row * c0_size + col_mod
     dst_ptr = pto.addptr(dst_ptr, dst_offset)
 
-    dst_stride = dst_rows * c0_size * elem_bytes
-    src_stride = src.shape[0] * pto.bytewidth(src_elem)
+    src_stride = src.shape[0]
+    dst_stride = n_size
 
     relu_mode_name = pto.get_op_attr("relu_pre_mode", "no_relu")
 

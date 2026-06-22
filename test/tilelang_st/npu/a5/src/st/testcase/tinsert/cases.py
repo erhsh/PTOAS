@@ -8,7 +8,12 @@
 
 # coding=utf-8
 
-"""Test cases for pto.tinsert ST (Acc->Mat NZ only)."""
+"""Test cases for pto.tinsert ST (Acc->Mat, L1->UB->GM output path).
+
+tinsert writes raw f32 acc data to the mat tile (no f32->f16 conversion).
+The f32->f16/bf16 conversion happens in mte_l1_l0a, not in tinsert.
+Output is f32 (raw matmul result).
+"""
 
 import numpy as np
 
@@ -20,8 +25,6 @@ CASES = [
         "m": 16, "k": 16, "n": 16,
         "dtype": np.float16,
         "dtype_out": np.float32,
-        "id_dtype": np.float16,
-        "path": "acc2mat_nz",
         "has_output": True,
         "eps": 1e-2,
     },
@@ -31,8 +34,6 @@ CASES = [
         "m": 16, "k": 16, "n": 16,
         "dtype": np.float16,
         "dtype_out": np.float32,
-        "id_dtype": np.uint16,
-        "path": "acc2mat_nz",
         "has_output": True,
         "eps": 1e-2,
     },
