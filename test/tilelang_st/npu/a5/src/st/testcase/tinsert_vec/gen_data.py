@@ -14,6 +14,14 @@ from cases import CASES
 from st_common import setup_case_rng, save_case_data
 
 
+def pack_nd_to_nz(mat):
+    """Pack 2D ND matrix to NZ fractal flat layout (N1-M0-N0)."""
+    rows, cols = mat.shape
+    c0 = 32 // mat.dtype.itemsize
+    num_col_blocks = cols // c0
+    return mat.reshape(rows, num_col_blocks, c0).transpose(1, 0, 2).reshape(-1)
+
+
 for case in CASES:
     setup_case_rng(case)
     dtype = case["dtype"]
@@ -27,7 +35,16 @@ for case in CASES:
     golden = dst.copy()
     golden[idx_row:idx_row + src_rows, idx_col:idx_col + src_cols] = src
 
-    data = {"input1": src, "input2": dst, "golden": golden}
+    if case.get("layout") == "nz":
+        src_save = pack_nd_to_nz(src)
+        dst_save = pack_nd_to_nz(dst)
+        golden_save = pack_nd_to_nz(golden)
+    else:
+        src_save = src
+        dst_save = dst
+        golden_save = golden
+
+    data = {"input1": src_save, "input2": dst_save, "golden": golden_save}
     save_case_data(case["name"], data)
     print(
         f"[INFO] gen_data: {case['name']} src=({src_rows},{src_cols}) dst=({dst_rows},{dst_cols}) "

@@ -40,17 +40,28 @@ def main():
             all_passed = False
             continue
 
-        golden = np.fromfile(golden_path, dtype=dtype).reshape(dst_rows, dst_cols)
-        output = np.fromfile(output_path, dtype=dtype).reshape(dst_rows, dst_cols)
+        if case.get("layout") == "nz":
+            golden = np.fromfile(golden_path, dtype=dtype).astype(np.float64)
+            output = np.fromfile(output_path, dtype=dtype).astype(np.float64)
+            if golden.size != output.size:
+                print(style_fail(
+                    f"[ERROR] {case['name']}: size mismatch golden={golden.size} output={output.size}"
+                ))
+                all_passed = False
+                continue
+            ok = result_cmp(golden, output, case["eps"])
+        else:
+            golden = np.fromfile(golden_path, dtype=dtype).reshape(dst_rows, dst_cols)
+            output = np.fromfile(output_path, dtype=dtype).reshape(dst_rows, dst_cols)
 
-        if golden.shape != output.shape:
-            print(style_fail(
-                f"[ERROR] {case['name']}: shape mismatch golden={golden.shape} output={output.shape}"
-            ))
-            all_passed = False
-            continue
+            if golden.shape != output.shape:
+                print(style_fail(
+                    f"[ERROR] {case['name']}: shape mismatch golden={golden.shape} output={output.shape}"
+                ))
+                all_passed = False
+                continue
 
-        ok = result_cmp(golden, output, case["eps"])
+            ok = result_cmp(golden, output, case["eps"])
         if ok:
             print(style_pass(f"[INFO] {case['name']}: compare passed"))
         else:

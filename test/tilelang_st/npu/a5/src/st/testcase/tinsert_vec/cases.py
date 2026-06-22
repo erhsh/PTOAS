@@ -8,7 +8,7 @@
 
 # coding=utf-8
 
-"""Test cases for pto.tinsert Vec->Vec ND vkernel ST."""
+"""Test cases for pto.tinsert Vec->Vec ND/NZ vkernel ST."""
 
 import numpy as np
 
@@ -46,5 +46,17 @@ CASES = [
         "index_col": 0,
         "has_output": True,
         "eps": 1e-6,
+    },
+    {
+        "name": "vec2vec_nz_f16_16x16_into_32x32_idx00",
+        "kernel": "TINSERT_vec2vec_nz_f16_16x16_into_32x32_idx00",
+        "dtype": np.float16,
+        "src_shape": (16, 16),
+        "dst_shape": (32, 32),
+        "index_row": 0,
+        "index_col": 0,
+        "layout": "nz",
+        "has_output": True,
+        "eps": 1e-2,
     },
 ]
