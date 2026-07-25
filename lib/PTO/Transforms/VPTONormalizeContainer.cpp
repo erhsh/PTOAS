@@ -38,18 +38,17 @@ static LogicalResult verifyNormalizedVPTOContainer(ModuleOp module) {
                 "submodules";
     }
     hasChildModules = true;
-    if (!isVPTOKernelSubmodule(child)) {
+    if (!isVPTOKernelSubmodule(child))
       return child.emitError()
              << "expected VPTO kernel submodule to carry 'pto.kernel_kind'";
-    }
   }
 
   if (hasChildModules)
     return success();
 
   return module.emitError()
-         << "expected VPTO input to be a kernel submodule with "
-            "'pto.kernel_kind' or a container of kernel submodules";
+         << "expected VPTO kernel submodule to carry 'pto.kernel_kind' "
+            "or a container of kernel submodules";
 }
 
 struct VPTONormalizeContainerPass

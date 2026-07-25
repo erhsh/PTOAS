@@ -80,7 +80,11 @@ static LogicalResult collectVPTOKernelStubDecls(
       if (!pto::isPTOEntryFunction(func))
         return;
 
-      std::string logicalName = getLogicalKernelName(func.getSymName());
+      std::string logicalName;
+      if (func->hasAttr(pto::kPTODSLLogicalNameAttrName))
+        logicalName = pto::getPTODSLLogicalNameOrSymbolName(func).str();
+      else
+        logicalName = getLogicalKernelName(func.getSymName());
       SmallVector<std::string> argTypes;
       argTypes.reserve(func.getNumArguments());
       for (Type type : func.getArgumentTypes())

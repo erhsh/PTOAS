@@ -260,11 +260,24 @@ static LogicalResult splitCVModule(ModuleOp module) {
   if (hasKernelKind(module))
     return materializeExplicitKernelKindSections(module);
   if (hasKernelKindChildModule(module)) {
+    SmallVector<ModuleOp> entryChildrenToFlatten;
     for (ModuleOp child : module.getOps<ModuleOp>()) {
-      if (!hasKernelKind(child))
-        continue;
-      if (failed(materializeExplicitKernelKindSections(child)))
-        return failure();
+      if (hasKernelKind(child)) {
+        if (failed(materializeExplicitKernelKindSections(child)))
+          return failure();
+      } else if (hasCVSections(child)) {
+        if (failed(splitCVModule(child)))
+          return failure();
+        entryChildrenToFlatten.push_back(child);
+      }
+    }
+    for (ModuleOp entryChild : entryChildrenToFlatten) {
+      SmallVector<ModuleOp> splitChildren;
+      for (ModuleOp gc : entryChild.getOps<ModuleOp>())
+        splitChildren.push_back(gc);
+      for (ModuleOp gc : splitChildren)
+        gc->moveBefore(module.getBody(), module.getBody()->end());
+      entryChild.erase();
     }
     return success();
   }

@@ -11631,11 +11631,8 @@ static void mergeDeviceModulesByKernelKind(ModuleOp module) {
 static LogicalResult renameKernelFunctionsForKernelKind(ModuleOp module,
                                                         llvm::raw_ostream &diagOS) {
   auto kernelKind = getKernelKind(module);
-  if (!kernelKind) {
-    diagOS << "VPTO LLVM emission failed: device module missing "
-           << FunctionKernelKindAttr::name << "\n";
-    return failure();
-  }
+  if (!kernelKind)
+    return success();
 
   StringRef suffix;
   if (*kernelKind == FunctionKernelKind::Vector)
@@ -11651,9 +11648,16 @@ static LogicalResult renameKernelFunctionsForKernelKind(ModuleOp module,
   for (func::FuncOp funcOp : module.getOps<func::FuncOp>()) {
     if (!pto::hasExplicitPTOEntryAttr(funcOp))
       continue;
-    if (funcOp.getSymName().ends_with(suffix))
+    llvm::StringRef baseNameRef = pto::getPTODSLLogicalNameOrSymbolName(funcOp);
+    std::string baseName = baseNameRef.str();
+    for (auto s : {kVectorSuffix, kCubeSuffix}) {
+      if (baseNameRef.ends_with(s))
+        baseName = baseName.substr(0, baseName.size() - s.size());
+    }
+    std::string newName = baseName + suffix.str();
+    if (funcOp.getSymName() == newName)
       continue;
-    funcOp.setSymName((funcOp.getSymName() + suffix).str());
+    funcOp.setSymName(newName);
   }
   return success();
 }

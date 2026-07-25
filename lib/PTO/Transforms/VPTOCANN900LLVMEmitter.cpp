@@ -35,6 +35,7 @@
 #include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Export.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
@@ -10793,14 +10794,223 @@ getUniqueDeviceModuleByKernelKind(ModuleOp module, FunctionKernelKind kind,
   return matched;
 }
 
+static LogicalResult mergeDeviceModulesByKernelKind(ModuleOp module) {
+  ModuleOp vectorModule;
+  ModuleOp cubeModule;
+  SmallVector<ModuleOp> modulesToErase;
+
+  for (ModuleOp child : module.getOps<ModuleOp>()) {
+    auto kernelKind = getKernelKind(child);
+    if (!kernelKind)
+      continue;
+
+    ModuleOp *target = nullptr;
+    if (*kernelKind == FunctionKernelKind::Vector)
+      target = &vectorModule;
+    else if (*kernelKind == FunctionKernelKind::Cube)
+      target = &cubeModule;
+    else
+      continue;
+
+    if (!*target) {
+      *target = child;
+      continue;
+    }
+
+    llvm::StringMap<func::FuncOp> targetFunctions;
+    for (func::FuncOp fn : (*target).getOps<func::FuncOp>())
+      targetFunctions[fn.getSymName()] = fn;
+
+    SmallVector<func::FuncOp> functionsToErase;
+    for (func::FuncOp incoming : child.getOps<func::FuncOp>()) {
+      auto it = targetFunctions.find(incoming.getSymName());
+      if (it == targetFunctions.end())
+        continue;
+      func::FuncOp existing = it->second;
+      if (existing.getFunctionType() != incoming.getFunctionType())
+        return incoming.emitOpError()
+               << "cannot merge device modules: symbol '"
+               << incoming.getSymName() << "' has conflicting function types";
+      if (!existing.isExternal() && !incoming.isExternal())
+        return incoming.emitOpError()
+               << "cannot merge device modules: duplicate definition of symbol '"
+               << incoming.getSymName() << "'";
+      if (existing.isExternal() && !incoming.isExternal()) {
+        existing.erase();
+        targetFunctions[incoming.getSymName()] = incoming;
+        continue;
+      }
+      functionsToErase.push_back(incoming);
+    }
+    for (func::FuncOp fn : functionsToErase)
+      fn.erase();
+
+    Block *srcBody = child.getBody();
+    Block *dstBody = (*target).getBody();
+    while (!srcBody->empty()) {
+      Operation &op = srcBody->front();
+      op.moveBefore(dstBody, dstBody->end());
+    }
+    modulesToErase.push_back(child);
+  }
+
+  for (ModuleOp child : modulesToErase)
+    child.erase();
+  return success();
+}
+
+static void removeDuplicateDeclarations(ModuleOp module) {
+  DenseMap<StringRef, func::FuncOp> definitions;
+  for (func::FuncOp funcOp : module.getOps<func::FuncOp>())
+    if (!funcOp.isExternal())
+      definitions[funcOp.getSymName()] = funcOp;
+
+  SmallVector<func::FuncOp, 4> toErase;
+  for (func::FuncOp funcOp : module.getOps<func::FuncOp>())
+    if (funcOp.isExternal() && definitions.count(funcOp.getSymName()))
+      toErase.push_back(funcOp);
+
+  for (func::FuncOp funcOp : toErase)
+    funcOp.erase();
+}
+
+static LogicalResult mergeAndCleanDuplicates(ModuleOp module) {
+  if (failed(mergeDeviceModulesByKernelKind(module)))
+    return failure();
+  for (ModuleOp child : module.getOps<ModuleOp>())
+    removeDuplicateDeclarations(child);
+
+  // After merging, the vector module's entry function may contain func.call
+  // to a cube sub-kernel that now lives in the separate cube module.  The AIV
+  // cannot execute cube code, so erase those calls and promote the cube
+  // callee to an entry function that the CANN host stub launches concurrently
+  // on the AIC.
+  ModuleOp cubeModule;
+  ModuleOp vectorModule;
+  for (ModuleOp child : module.getOps<ModuleOp>()) {
+    auto kind = getKernelKind(child);
+    if (!kind)
+      continue;
+    if (*kind == FunctionKernelKind::Cube)
+      cubeModule = child;
+    else if (*kind == FunctionKernelKind::Vector)
+      vectorModule = child;
+  }
+  if (!cubeModule || !vectorModule)
+    return success();
+
+  // Collect cube function symbol names that have definitions.
+  DenseSet<StringRef> cubeDefinedSymbols;
+  for (func::FuncOp fn : cubeModule.getOps<func::FuncOp>())
+    if (!fn.isExternal())
+      cubeDefinedSymbols.insert(fn.getSymName());
+
+  // In the vector module, find func.call ops to cube-defined symbols.
+  // Erase those calls and mark the cube callee as an entry function.
+  DenseSet<StringRef> cubeCallsToPromote;
+  vectorModule.walk([&](func::CallOp call) {
+    StringRef callee = call.getCallee();
+    if (cubeDefinedSymbols.count(callee))
+      cubeCallsToPromote.insert(callee);
+  });
+
+  if (cubeCallsToPromote.empty())
+    return success();
+
+  func::FuncOp vectorEntry;
+  for (func::FuncOp fn : vectorModule.getOps<func::FuncOp>()) {
+    if (!pto::isPTOEntryFunction(fn))
+      continue;
+    if (vectorEntry)
+      return fn.emitOpError()
+             << "cross-kernel call promotion requires one vector entry per "
+                "merged device module";
+    vectorEntry = fn;
+  }
+  if (!vectorEntry)
+    return vectorModule.emitError()
+           << "cross-kernel call promotion requires a vector entry function";
+  if (cubeCallsToPromote.size() != 1)
+    return vectorEntry.emitOpError()
+           << "cross-kernel call promotion supports exactly one cube callee";
+  func::FuncOp cubeCallee;
+  for (func::FuncOp fn : cubeModule.getOps<func::FuncOp>())
+    if (!fn.isExternal() && cubeCallsToPromote.count(fn.getSymName()))
+      cubeCallee = fn;
+  if (!cubeCallee ||
+      cubeCallee.getFunctionType() != vectorEntry.getFunctionType())
+    return vectorEntry.emitOpError()
+           << "cross-kernel cube callee must have the same signature as its "
+              "vector entry";
+
+  // Erase func.call ops in the vector module that target cube callees.
+  SmallVector<func::CallOp, 4> callsToErase;
+  vectorModule.walk([&](func::CallOp call) {
+    if (cubeCallsToPromote.count(call.getCallee()))
+      callsToErase.push_back(call);
+  });
+  if (callsToErase.size() != 1)
+    return vectorEntry.emitOpError()
+           << "cross-kernel call promotion requires exactly one call to the "
+              "cube callee";
+  for (func::CallOp call : callsToErase) {
+    if (call->getParentOp() != vectorEntry || call.getNumResults() != 0)
+      return call.emitOpError()
+             << "cross-kernel cube call must be unconditional and return no "
+                "values";
+    if (call.getNumOperands() != vectorEntry.getNumArguments())
+      return call.emitOpError()
+             << "cross-kernel cube call must forward every entry argument";
+    for (auto [operand, argument] :
+         llvm::zip_equal(call.getOperands(), vectorEntry.getArguments()))
+      if (operand != argument)
+        return call.emitOpError()
+               << "cross-kernel cube call operands must be the entry arguments "
+                  "in order";
+  }
+  for (func::CallOp call : callsToErase)
+    call.erase();
+
+  // Erase the now-unused external declarations of cube callees in the vector module.
+  SmallVector<func::FuncOp, 4> declsToErase;
+  for (func::FuncOp fn : vectorModule.getOps<func::FuncOp>())
+    if (fn.isExternal() && cubeCallsToPromote.count(fn.getSymName()))
+      declsToErase.push_back(fn);
+  for (func::FuncOp fn : declsToErase)
+    fn.erase();
+
+  // Promote cube callees to entry functions and give them the same logical
+  // name as the vector entry so the host stub creates a single __global__
+  // kernel that launches both AIC and AIV concurrently.
+  // Find the logical name of the vector entry function.
+  StringRef vectorEntryLogicalName;
+  for (func::FuncOp fn : vectorModule.getOps<func::FuncOp>()) {
+    if (pto::isPTOEntryFunction(fn)) {
+      vectorEntryLogicalName = pto::getPTODSLLogicalNameOrSymbolName(fn);
+      break;
+    }
+  }
+  if (vectorEntryLogicalName.empty())
+    return vectorEntry.emitOpError()
+           << "cross-kernel vector entry requires a non-empty logical name";
+
+  for (func::FuncOp fn : cubeModule.getOps<func::FuncOp>()) {
+    if (!cubeCallsToPromote.count(fn.getSymName()))
+      continue;
+    // Mark as entry.
+    fn->setAttr(pto::kPTOEntryAttrName, UnitAttr::get(fn.getContext()));
+    // Set the logical name to match the vector entry.
+    fn->setAttr(pto::kPTODSLLogicalNameAttrName,
+                StringAttr::get(fn.getContext(), vectorEntryLogicalName));
+  }
+  return success();
+}
+
 static LogicalResult renameKernelFunctionsForKernelKind(ModuleOp module,
                                                         llvm::raw_ostream &diagOS) {
   auto kernelKind = getKernelKind(module);
-  if (!kernelKind) {
-    diagOS << "VPTO LLVM emission failed: device module missing "
-           << FunctionKernelKindAttr::name << "\n";
-    return failure();
-  }
+  if (!kernelKind)
+    return success();
 
   StringRef suffix;
   if (*kernelKind == FunctionKernelKind::Vector)
@@ -10816,9 +11026,16 @@ static LogicalResult renameKernelFunctionsForKernelKind(ModuleOp module,
   for (func::FuncOp funcOp : module.getOps<func::FuncOp>()) {
     if (!pto::hasExplicitPTOEntryAttr(funcOp))
       continue;
-    if (funcOp.getSymName().ends_with(suffix))
+    llvm::StringRef baseNameRef = pto::getPTODSLLogicalNameOrSymbolName(funcOp);
+    std::string baseName = baseNameRef.str();
+    for (auto s : {kVectorSuffix, kCubeSuffix}) {
+      if (baseNameRef.ends_with(s))
+        baseName = baseName.substr(0, baseName.size() - s.size());
+    }
+    std::string newName = baseName + suffix.str();
+    if (funcOp.getSymName() == newName)
       continue;
-    funcOp.setSymName((funcOp.getSymName() + suffix).str());
+    funcOp.setSymName(newName);
   }
   return success();
 }
@@ -10969,6 +11186,11 @@ static LogicalResult runPipeline(ModuleOp module, llvm::raw_ostream &diagOS,
                                  EmitFn &&emit) {
   OwningOpRef<Operation *> clonedOp(module->clone());
   ModuleOp clonedModule = cast<ModuleOp>(*clonedOp);
+
+  if (failed(mergeAndCleanDuplicates(clonedModule))) {
+    diagOS << "VPTO LLVM emission failed: unable to merge device modules\n";
+    return failure();
+  }
 
   if (failed(validateVPTOAuthoringIR(clonedModule, &diagOS))) {
     diagOS << "VPTO LLVM emission failed: authoring-stage VPTO legality "
