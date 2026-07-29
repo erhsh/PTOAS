@@ -5174,6 +5174,8 @@ def mte_l1_l0a_mx(
     *,
     start_row=0,
     start_col=0,
+    src_stride=None,
+    dst_stride=None,
 ):
     """``pto.mte_l1_l0a_mx`` – MX cube-side LEFT staging."""
     _pto.MteL1L0aMxOp(
@@ -5183,6 +5185,12 @@ def mte_l1_l0a_mx(
         _coerce_i64(k, context="mte_l1_l0a_mx k"),
         _coerce_i64(start_row, context="mte_l1_l0a_mx start_row"),
         _coerce_i64(start_col, context="mte_l1_l0a_mx start_col"),
+        src_stride=(
+            None if src_stride is None else _coerce_i64(src_stride, context="mte_l1_l0a_mx src_stride")
+        ),
+        dst_stride=(
+            None if dst_stride is None else _coerce_i64(dst_stride, context="mte_l1_l0a_mx dst_stride")
+        ),
     )
 
 
@@ -5195,6 +5203,8 @@ def mte_l1_l0b_mx(
     *,
     start_row=0,
     start_col=0,
+    src_stride=None,
+    dst_stride=None,
 ):
     """``pto.mte_l1_l0b_mx`` – MX cube-side RIGHT staging."""
     _pto.MteL1L0bMxOp(
@@ -5204,6 +5214,12 @@ def mte_l1_l0b_mx(
         _coerce_i64(n, context="mte_l1_l0b_mx n"),
         _coerce_i64(start_row, context="mte_l1_l0b_mx start_row"),
         _coerce_i64(start_col, context="mte_l1_l0b_mx start_col"),
+        src_stride=(
+            None if src_stride is None else _coerce_i64(src_stride, context="mte_l1_l0b_mx src_stride")
+        ),
+        dst_stride=(
+            None if dst_stride is None else _coerce_i64(dst_stride, context="mte_l1_l0b_mx dst_stride")
+        ),
     )
 
 

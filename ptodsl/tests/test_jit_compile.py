@@ -2134,6 +2134,8 @@ def public_cube_surface_probe(
         k,
         start_row=start_row,
         start_col=start_col,
+        src_stride=8,
+        dst_stride=4,
     )
     pto.mte_l1_l0b_mx(
         rhs_tile_mx.as_ptr(),
@@ -2142,6 +2144,8 @@ def public_cube_surface_probe(
         n,
         start_row=start_col,
         start_col=start_row,
+        src_stride=8,
+        dst_stride=4,
     )
     pto.mad(
         lhs_l0a.as_ptr(),
@@ -6616,6 +6620,10 @@ def main() -> None:
     expect("pto.mte_l1_l0b" in public_surface_text, "mte_l1_l0b(...) should lower to pto.mte_l1_l0b")
     expect("pto.mte_l1_l0a_mx" in public_surface_text, "mte_l1_l0a_mx(...) should lower to pto.mte_l1_l0a_mx")
     expect("pto.mte_l1_l0b_mx" in public_surface_text, "mte_l1_l0b_mx(...) should lower to pto.mte_l1_l0b_mx")
+    expect(
+        public_surface_text.count("strides(") >= 2,
+        "MX L1-to-L0 loads should preserve explicit source/destination strides",
+    )
     expect("pto.tmatmul.mx" in public_surface_text, "pto.tile.matmul_mx should lower to pto.tmatmul.mx")
     expect("pto.tmatmul.mx.acc" in public_surface_text, "pto.tile.matmul_mx_acc should lower to pto.tmatmul.mx.acc")
     expect("pto.tmatmul.mx.bias" in public_surface_text, "pto.tile.matmul_mx_bias should lower to pto.tmatmul.mx.bias")

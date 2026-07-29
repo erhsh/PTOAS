@@ -3014,6 +3014,7 @@ def PTO_MteL1L0bOp : PTO_MteOp<"mte_l1_l0b", [
 }
 
 def PTO_MteL1L0aMxOp : PTO_MteOp<"mte_l1_l0a_mx", [
+    AttrSizedOperandSegments,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
   ]> {
   let arguments = (ins
@@ -3022,7 +3023,9 @@ def PTO_MteL1L0aMxOp : PTO_MteOp<"mte_l1_l0a_mx", [
     I64:$m,
     I64:$k,
     I64:$start_row,
-    I64:$start_col
+    I64:$start_col,
+    Optional<I64>:$src_stride,
+    Optional<I64>:$dst_stride
   );
 
   let results = (outs);
@@ -3031,12 +3034,14 @@ def PTO_MteL1L0aMxOp : PTO_MteOp<"mte_l1_l0a_mx", [
 
   let assemblyFormat = [{
     $source `,` $destination `,` $m `,` $k `,` $start_row `,` $start_col
+    (`strides` `(` $src_stride^ `,` $dst_stride `)`)?
     attr-dict `:` type($source) `,` type($destination) `,` type($m) `,`
     type($k) `,` type($start_row) `,` type($start_col)
   }];
 }
 
 def PTO_MteL1L0bMxOp : PTO_MteOp<"mte_l1_l0b_mx", [
+    AttrSizedOperandSegments,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
   ]> {
   let arguments = (ins
@@ -3045,7 +3050,9 @@ def PTO_MteL1L0bMxOp : PTO_MteOp<"mte_l1_l0b_mx", [
     I64:$k,
     I64:$n,
     I64:$start_row,
-    I64:$start_col
+    I64:$start_col,
+    Optional<I64>:$src_stride,
+    Optional<I64>:$dst_stride
   );
 
   let results = (outs);
@@ -3054,6 +3061,7 @@ def PTO_MteL1L0bMxOp : PTO_MteOp<"mte_l1_l0b_mx", [
 
   let assemblyFormat = [{
     $source `,` $destination `,` $k `,` $n `,` $start_row `,` $start_col
+    (`strides` `(` $src_stride^ `,` $dst_stride `)`)?
     attr-dict `:` type($source) `,` type($destination) `,` type($k) `,`
     type($n) `,` type($start_row) `,` type($start_col)
   }];

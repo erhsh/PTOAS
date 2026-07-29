@@ -815,8 +815,7 @@ deriveLoadCbufToCbControl(Location loc, Value k, Value n, Type elementType,
     Value kBytes = rewriter.create<arith::MulIOp>(loc, k, constant(elemBytes));
     Value kStep = maybeScaleS4KCoord(ceilDivConst(kBytes, 32));
     Value stride = ceilDivConst(n, 16);
-    return LoadCbufToCbControl{mStart, maybeScaleS4KCoord(kStart), mStep, kStep,
-                               stride, stride};
+    return LoadCbufToCbControl{mStart, kStart, mStep, kStep, stride, stride};
   }
 
   uint64_t c0Size =
@@ -830,8 +829,8 @@ deriveLoadCbufToCbControl(Location loc, Value k, Value n, Type elementType,
   Value kStep = maybeScaleS4KCoord(ceilDivConst(nBytes, 32));
   Value srcStride = ceilDivConst(kAlign, 16);
   Value dstStride = ceilDivConst(nAlign, 16);
-  return LoadCbufToCbControl{mStart, maybeScaleS4KCoord(kStart), mStep, kStep,
-                             srcStride, dstStride};
+  return LoadCbufToCbControl{mStart, kStart, mStep, kStep, srcStride,
+                             dstStride};
 }
 
 static FailureOr<LoadCbufToCbControl>
@@ -868,8 +867,7 @@ deriveLoadCbufToCaControl(Location loc, Value m, Value k, Type elementType,
     Value kBytes = rewriter.create<arith::MulIOp>(loc, k, constant(elemBytes));
     Value kStep = maybeScaleS4KCoord(ceilDivConst(kBytes, 32));
     Value stride = ceilDivConst(m, 16);
-    return LoadCbufToCbControl{mStart, maybeScaleS4KCoord(kStart), mStep, kStep,
-                               stride, stride};
+    return LoadCbufToCbControl{mStart, kStart, mStep, kStep, stride, stride};
   }
 
   uint64_t c0Size =
@@ -883,8 +881,8 @@ deriveLoadCbufToCaControl(Location loc, Value m, Value k, Type elementType,
   Value kStep = maybeScaleS4KCoord(ceilDivConst(mBytes, 32));
   Value srcStride = ceilDivConst(kAlign, 16);
   Value dstStride = ceilDivConst(mAlign, 16);
-  return LoadCbufToCbControl{mStart, maybeScaleS4KCoord(kStart), mStep, kStep,
-                             srcStride, dstStride};
+  return LoadCbufToCbControl{mStart, kStart, mStep, kStep, srcStride,
+                             dstStride};
 }
 
 static FailureOr<LoadCbufToMxControl>
@@ -1558,10 +1556,12 @@ struct ExpandLeftLoadMxPattern : public OpRewritePattern<pto::MteL1L0aMxOp> {
       return rewriter.notifyMatchFailure(op,
                                          "failed to derive load_cbuf_to_ca_mx control");
 
+    Value srcStride = op.getSrcStride() ? op.getSrcStride() : control->srcStride;
+    Value dstStride = op.getDstStride() ? op.getDstStride() : control->dstStride;
     rewriter.create<pto::LoadCbufToCaMxOp>(
         loc, source, destination, control->xStartPosition,
         control->yStartPosition, control->xStep, control->yStep,
-        control->srcStride, control->dstStride);
+        srcStride, dstStride);
     rewriter.eraseOp(op);
     return success();
   }
@@ -1590,10 +1590,12 @@ struct ExpandRightLoadMxPattern : public OpRewritePattern<pto::MteL1L0bMxOp> {
       return rewriter.notifyMatchFailure(op,
                                          "failed to derive load_cbuf_to_cb_mx control");
 
+    Value srcStride = op.getSrcStride() ? op.getSrcStride() : control->srcStride;
+    Value dstStride = op.getDstStride() ? op.getDstStride() : control->dstStride;
     rewriter.create<pto::LoadCbufToCbMxOp>(
         loc, source, destination, control->xStartPosition,
         control->yStartPosition, control->xStep, control->yStep,
-        control->srcStride, control->dstStride);
+        srcStride, dstStride);
     rewriter.eraseOp(op);
     return success();
   }

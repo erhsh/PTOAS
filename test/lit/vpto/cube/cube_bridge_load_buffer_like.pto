@@ -30,6 +30,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
     %c0_i64 = arith.constant 0 : i64
     %c2_i64 = arith.constant 2 : i64
     %c4_i64 = arith.constant 4 : i64
+    %c8_i64 = arith.constant 8 : i64
     %c16_i64 = arith.constant 16 : i64
     %c64_i64 = arith.constant 64 : i64
 
@@ -37,17 +38,17 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       : memref<?xf16, #pto.address_space<mat>>, memref<?xf16, #pto.address_space<left>>, i64, i64, i64, i64
     pto.mte_l1_l0b %src_mat, %dst_right, %c16_i64, %c16_i64, %c0_i64, %c0_i64 {transpose = true}
       : memref<?xf16, #pto.address_space<mat>>, memref<?xf16, #pto.address_space<right>>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %src_mat, %dst_left_mx, %c16_i64, %c16_i64, %c0_i64, %c0_i64
+    pto.mte_l1_l0a_mx %src_mat, %dst_left_mx, %c16_i64, %c16_i64, %c0_i64, %c0_i64 strides(%c8_i64, %c4_i64)
       : memref<?xf16, #pto.address_space<mat>>, memref<?xf16, #pto.address_space<left>>, i64, i64, i64, i64
-    pto.mte_l1_l0b_mx %src_mat, %dst_right_mx, %c16_i64, %c16_i64, %c0_i64, %c0_i64
+    pto.mte_l1_l0b_mx %src_mat, %dst_right_mx, %c16_i64, %c16_i64, %c0_i64, %c0_i64 strides(%c8_i64, %c4_i64)
       : memref<?xf16, #pto.address_space<mat>>, memref<?xf16, #pto.address_space<right>>, i64, i64, i64, i64
     pto.mte_l1_l0a %src_hif8, %dst_left_hif8, %c16_i64, %c16_i64, %c0_i64, %c0_i64
       : memref<?x!pto.hif8, #pto.address_space<mat>>, memref<?x!pto.hif8, #pto.address_space<left>>, i64, i64, i64, i64
     pto.mte_l1_l0b %src_hif8, %dst_right_hif8, %c16_i64, %c16_i64, %c0_i64, %c0_i64 {transpose = true}
       : memref<?x!pto.hif8, #pto.address_space<mat>>, memref<?x!pto.hif8, #pto.address_space<right>>, i64, i64, i64, i64
-    pto.mte_l1_l0a %src_fp4, %dst_left_fp4, %c16_i64, %c64_i64, %c0_i64, %c0_i64
+    pto.mte_l1_l0a %src_fp4, %dst_left_fp4, %c16_i64, %c64_i64, %c0_i64, %c4_i64
       : memref<?x!pto.f4E2M1x2, #pto.address_space<mat>>, memref<?x!pto.f4E2M1x2, #pto.address_space<left>>, i64, i64, i64, i64
-    pto.mte_l1_l0b %src_fp4, %dst_right_fp4, %c64_i64, %c16_i64, %c0_i64, %c0_i64 {transpose = true}
+    pto.mte_l1_l0b %src_fp4, %dst_right_fp4, %c64_i64, %c16_i64, %c0_i64, %c4_i64 {transpose = true}
       : memref<?x!pto.f4E2M1x2, #pto.address_space<mat>>, memref<?x!pto.f4E2M1x2, #pto.address_space<right>>, i64, i64, i64, i64
     pto.mte_l1_bt %src_mat, %dst_bias, %c4_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
       : memref<?xf16, #pto.address_space<mat>>, memref<?xf32, #pto.address_space<bias>>, i64, i64, i64, i64
@@ -72,8 +73,8 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
 // ROUNDTRIP-SAME: %{{.*}}: !pto.ptr<f16, l1>, %{{.*}}: !pto.ptr<f16, l0a>, %{{.*}}: !pto.ptr<f16, l0b>, %{{.*}}: !pto.ptr<f16, l0a>, %{{.*}}: !pto.ptr<f16, l0b>, %{{.*}}: !pto.ptr<!pto.hif8, l1>, %{{.*}}: !pto.ptr<!pto.hif8, l0a>, %{{.*}}: !pto.ptr<!pto.hif8, l0b>, %{{.*}}: !pto.ptr<!pto.f4E2M1x2, l1>, %{{.*}}: !pto.ptr<!pto.f4E2M1x2, l0a>, %{{.*}}: !pto.ptr<!pto.f4E2M1x2, l0b>, %{{.*}}: !pto.ptr<f32, bt>) attributes {pto.kernel} {
 // ROUNDTRIP: pto.mte_l1_l0a %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}
 // ROUNDTRIP: pto.mte_l1_l0b %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} {transpose = true}
-// ROUNDTRIP: pto.mte_l1_l0a_mx %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}
-// ROUNDTRIP: pto.mte_l1_l0b_mx %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}
+// ROUNDTRIP: pto.mte_l1_l0a_mx %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} strides(%{{.*}}, %{{.*}})
+// ROUNDTRIP: pto.mte_l1_l0b_mx %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} strides(%{{.*}}, %{{.*}})
 // ROUNDTRIP: pto.mte_l1_l0a %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : !pto.ptr<!pto.hif8, l1>, !pto.ptr<!pto.hif8, l0a>
 // ROUNDTRIP: pto.mte_l1_l0b %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} {transpose = true} : !pto.ptr<!pto.hif8, l1>, !pto.ptr<!pto.hif8, l0b>
 // ROUNDTRIP: pto.mte_l1_l0a %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0a>
@@ -83,12 +84,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
 // EXPAND-BUFFER-LABEL: func.func @cube_bridge_load_buffer_like(
 // EXPAND-BUFFER: pto.load_cbuf_to_ca
 // EXPAND-BUFFER: pto.load_cbuf_to_cb
-// EXPAND-BUFFER: pto.load_cbuf_to_ca_mx %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}
-// EXPAND-BUFFER: pto.load_cbuf_to_cb_mx
+// EXPAND-BUFFER: pto.load_cbuf_to_ca_mx %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %c8_i64, %c4_i64
+// EXPAND-BUFFER: pto.load_cbuf_to_cb_mx %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %c8_i64, %c4_i64
 // EXPAND-BUFFER: pto.load_cbuf_to_ca
 // EXPAND-BUFFER: pto.load_cbuf_to_cb
-// EXPAND-BUFFER: pto.load_cbuf_to_ca_s4
-// EXPAND-BUFFER: pto.load_cbuf_to_cb_s4
+// EXPAND-BUFFER: pto.load_cbuf_to_ca_s4 %{{.*}}, %{{.*}}, %{{.*}}, %c4_i64
+// EXPAND-BUFFER: pto.load_cbuf_to_cb_s4 %{{.*}}, %{{.*}}, %{{.*}}, %c4_i64
 // EXPAND-BUFFER: pto.copy_cbuf_to_bt
 
 // EXPAND-RIGHT: pto.load_cbuf_to_cb_mx %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} : !pto.ptr<!pto.hif8, l1>, !pto.ptr<!pto.hif8, l0b>, i64, i64, i64, i64, i64, i64
