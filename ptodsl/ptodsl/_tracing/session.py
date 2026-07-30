@@ -290,6 +290,15 @@ class TraceSession:
         kind = getattr(module_spec, "kernel_kind", None)
         return kind if kind in {"cube", "vector"} else None
 
+    def prepare_explicit_compute_section(self) -> None:
+        """Allow authored sections to determine an implicit kernel kind."""
+        module_spec = self.current_function_module_spec
+        if getattr(module_spec, "kernel_kind_explicit", False):
+            return
+        child_module = self.current_function.operation.parent
+        if "pto.kernel_kind" in child_module.attributes:
+            del child_module.attributes["pto.kernel_kind"]
+
     def _subkernel_section_policy(self, role: str) -> str:
         role_kind = self._subkernel_role_kernel_kind(role)
         explicit_kind = self._current_explicit_kernel_kind()
@@ -341,6 +350,41 @@ class TraceSession:
             block = section_op.body.blocks.append()
             with InsertionPoint(block):
                 yield frame
+        finally:
+            popped = self._subkernel_stack.pop()
+            if popped is not frame:
+                raise RuntimeError("PTODSL trace-session subkernel stack corruption detected")
+
+    @contextmanager
+    def enter_explicit_compute_section(self, role: str, symbol_name: str, target: str):
+        """Enter one authored Cube or Vector section without outlining it."""
+        role_kind = self._subkernel_role_kernel_kind(role)
+        explicit_kind = self._current_explicit_kernel_kind()
+        if explicit_kind is not None and explicit_kind != role_kind:
+            raise subkernel_kernel_kind_mismatch_error(role, explicit_kind)
+        self.prepare_explicit_compute_section()
+
+        frame = SubkernelTraceFrame(
+            role=role,
+            symbol_name=symbol_name,
+            target=target,
+        )
+        section_op = self._create_subkernel_section_op(role)
+        if section_op is None:
+            raise RuntimeError(f"unsupported explicit compute section role {role!r}")
+        body_block = section_op.body.blocks.append()
+        self._subkernel_stack.append(frame)
+        try:
+            with InsertionPoint(body_block):
+                yield frame
+        except BaseException:
+            self._erase_attached_op(section_op)
+            raise
+        else:
+            self._note_escaped_inline_values(
+                self._collect_defined_values((section_op,)),
+                role=role,
+            )
         finally:
             popped = self._subkernel_stack.pop()
             if popped is not frame:

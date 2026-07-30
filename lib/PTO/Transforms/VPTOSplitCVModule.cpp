@@ -31,11 +31,6 @@ static bool hasKernelKind(ModuleOp module) {
   return module->hasAttr(FunctionKernelKindAttr::name);
 }
 
-static bool hasKernelKindChildModule(ModuleOp module) {
-  return llvm::any_of(module.getOps<ModuleOp>(),
-                      [](ModuleOp child) { return hasKernelKind(child); });
-}
-
 static bool isSectionSplitCandidate(func::FuncOp funcOp);
 
 static bool hasCVSections(ModuleOp module) {
@@ -256,18 +251,43 @@ static LogicalResult materializeExplicitKernelKindSections(ModuleOp module) {
   return success();
 }
 
+static LogicalResult splitSectionChildModule(ModuleOp child) {
+  if (failed(verifyNoNestedSections(child)) ||
+      failed(verifySectionSplitCandidatesUseSections(child)))
+    return failure();
+
+  bool needVector = hasSectionKind(child, FunctionKernelKind::Vector);
+  bool needCube = hasSectionKind(child, FunctionKernelKind::Cube);
+  if (!needVector && !needCube)
+    return success();
+
+  OpBuilder builder(child);
+  if (needVector)
+    cloneModuleForKind(child, FunctionKernelKind::Vector, builder);
+  if (needCube)
+    cloneModuleForKind(child, FunctionKernelKind::Cube, builder);
+  child.erase();
+  return success();
+}
+
 static LogicalResult splitCVModule(ModuleOp module) {
   if (hasKernelKind(module))
     return materializeExplicitKernelKindSections(module);
-  if (hasKernelKindChildModule(module)) {
-    for (ModuleOp child : module.getOps<ModuleOp>()) {
-      if (!hasKernelKind(child))
+
+  SmallVector<ModuleOp> directChildren(module.getOps<ModuleOp>());
+  if (!directChildren.empty()) {
+    for (ModuleOp child : directChildren) {
+      if (hasKernelKind(child)) {
+        if (failed(materializeExplicitKernelKindSections(child)))
+          return failure();
         continue;
-      if (failed(materializeExplicitKernelKindSections(child)))
+      }
+      if (hasCVSections(child) && failed(splitSectionChildModule(child)))
         return failure();
     }
     return success();
   }
+
   if (!hasCVSections(module))
     return success();
   if (failed(verifyNoNestedSections(module)))

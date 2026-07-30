@@ -1,0 +1,38 @@
+// RUN: pto-test-opt --vpto-split-cv-module %s | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  module attributes {pto.backend = "vpto", pto.target_arch = "a5"} {
+    func.func @main(%arg0: index) attributes {pto.entry} {
+      %c0_i64 = arith.constant 0 : i64
+      pto.section.cube {
+        pto.sync.set <PIPE_FIX>, %arg0
+      }
+      pto.section.vector {
+        pto.sync.wait <PIPE_MTE3>, %arg0
+      }
+      return
+    }
+
+    func.func private @ordinary_helper() {
+      return
+    }
+  }
+}
+
+// CHECK: module attributes {pto.target_arch = "a5"}
+// CHECK-NEXT: module attributes
+// CHECK-SAME: pto.backend = "vpto"
+// CHECK-SAME: pto.kernel_kind = #pto.kernel_kind<vector>
+// CHECK-NOT: builtin.module
+// CHECK: func.func @main
+// CHECK: pto.sync.wait <PIPE_MTE3>
+// CHECK-NOT: pto.sync.set
+// CHECK: func.func private @ordinary_helper
+// CHECK: module attributes
+// CHECK-SAME: pto.backend = "vpto"
+// CHECK-SAME: pto.kernel_kind = #pto.kernel_kind<cube>
+// CHECK-NOT: builtin.module
+// CHECK: func.func @main
+// CHECK: pto.sync.set <PIPE_FIX>
+// CHECK-NOT: pto.sync.wait
+// CHECK: func.func private @ordinary_helper

@@ -15,6 +15,7 @@ from functools import update_wrapper
 import inspect
 
 from ._diagnostics import (
+    explicit_mode_required_with_context_error,
     illegal_inline_subkernel_placement_error,
     illegal_subkernel_placement_error,
     legacy_subkernel_decorator_error,
@@ -509,6 +510,50 @@ class _SubkernelSurface:
             self._session_cm = None
 
 
+class _ExplicitSectionSurface:
+    """Direct low-level compute section for explicit PTODSL kernels."""
+
+    def __init__(self, role: KernelRole, surface: str):
+        self._role = role
+        self._surface = surface
+        self._session_cm = None
+
+    def __enter__(self):
+        runtime = current_runtime()
+        if runtime is None:
+            raise RuntimeError(
+                f"{self._surface} may only be used while tracing "
+                'a @pto.jit(mode="explicit") kernel'
+            )
+        session = current_session()
+        module_spec = session.current_function_module_spec
+        if getattr(module_spec, "mode", None) != "explicit":
+            raise explicit_mode_required_with_context_error(self._surface, module_spec)
+        if getattr(module_spec, "backend", None) != "vpto":
+            raise RuntimeError(f"{self._surface} requires @pto.jit(backend=\"vpto\")")
+        outer = session.current_subkernel
+        if outer is not None:
+            raise RuntimeError(
+                f"{self._surface} may only be used from the top-level "
+                '@pto.jit(mode="explicit") body and cannot be nested inside '
+                f"pto.{outer.role}"
+            )
+        symbol_name = f"explicit_{self._role.value}_section"
+        self._session_cm = session.enter_explicit_compute_section(
+            self._role.value,
+            symbol_name,
+            module_spec.target_arch,
+        )
+        self._session_cm.__enter__()
+        return None
+
+    def __exit__(self, *exc):
+        try:
+            return self._session_cm.__exit__(*exc)
+        finally:
+            self._session_cm = None
+
+
 def _subkernel_decorator(
     role: KernelRole,
     *,
@@ -575,6 +620,16 @@ def tileop(fn=None, *, name: str | None = None, target: str = "a5", ast_rewrite:
     return _decorate_subkernel(KernelRole.TILEOP, fn, name=name, target=target, ast_rewrite=ast_rewrite)
 
 
+def cube_section():
+    """Return a direct Cube section for an explicit low-level VPTO kernel."""
+    return _ExplicitSectionSurface(KernelRole.CUBE, "pto.cube_section()")
+
+
+def vector_section():
+    """Return a direct Vector section for an explicit low-level VPTO kernel."""
+    return _ExplicitSectionSurface(KernelRole.SIMD, "pto.vector_section()")
+
+
 def _validate_simt_resource_attr(name: str, value: int | None) -> int | None:
     if value is None:
         return None
@@ -620,7 +675,9 @@ __all__ = [
     "SubkernelSpec",
     "SubkernelTemplate",
     "cube",
+    "cube_section",
     "simd",
     "tileop",
     "simt",
+    "vector_section",
 ]

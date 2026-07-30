@@ -168,7 +168,14 @@ from ._allreduce import simt_allreduce_max, simt_allreduce_min, simt_allreduce_s
 
 # ── Decorator ─────────────────────────────────────────────────────────────────
 from ._jit import jit, KernelHandle, merge_jit_modules      # noqa: F401
-from ._subkernels import cube, simd, simt, tileop     # noqa: F401
+from ._subkernels import (  # noqa: F401
+    cube,
+    cube_section,
+    simd,
+    simt,
+    tileop,
+    vector_section,
+)
 from ._pipe_namespace import pipe  # noqa: F401
 
 # ── Shorthand dtype aliases ───────────────────────────────────────────────────
