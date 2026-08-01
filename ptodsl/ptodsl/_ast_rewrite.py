@@ -418,6 +418,13 @@ def _slot_live_before_stmt(stmt, live_after, static_env, static_iters) -> set[_S
             | _slot_live_before_block(stmt.body, set(), static_env, static_iters)
             | _slot_live_before_block(stmt.orelse, set(), static_env, static_iters)
         )
+    if isinstance(stmt, (ast.With, ast.AsyncWith)):
+        context_info = _slot_info(
+            [item.context_expr for item in stmt.items], static_env, static_iters
+        )
+        return set(context_info.loads) | _slot_live_before_block(
+            stmt.body, live_after, static_env, static_iters
+        )
     info = _slot_info(stmt, static_env, static_iters)
     live = _kill_slots_for_assigned_bases(live_after, stmt)
     return (set(live) - info.stores) | info.loads
@@ -687,6 +694,14 @@ def _live_before_stmt(stmt, live_after) -> set[str]:
             | (_live_before_block(stmt.body, set()) - target_stores)
             | _live_before_block(stmt.orelse, set())
         )
+    if isinstance(stmt, (ast.With, ast.AsyncWith)):
+        bound = set()
+        context_loads = set()
+        for item in stmt.items:
+            context_loads.update(_name_info(item.context_expr).loads)
+            if item.optional_vars is not None:
+                bound.update(_simple_name_targets(item.optional_vars))
+        return context_loads | (_live_before_block(stmt.body, live_after) - bound)
     info = _name_info(stmt)
     return (set(live_after) - info.stores) | info.loads
 
@@ -703,6 +718,141 @@ def _is_pto_attr_call(node, name: str) -> bool:
         and isinstance(node.func.value, ast.Name)
         and node.func.value.id == "pto"
     )
+
+
+def _pto_section_kind(stmt) -> str | None:
+    """Return the authored physical section kind for a supported ``with``."""
+    if not isinstance(stmt, ast.With) or len(stmt.items) != 1:
+        return None
+    item = stmt.items[0]
+    if item.optional_vars is not None or not _is_pto_attr_call(
+        item.context_expr, "section"
+    ):
+        return None
+    call = item.context_expr
+    if (
+        len(call.args) != 1
+        or call.keywords
+        or not isinstance(call.args[0], ast.Constant)
+    ):
+        return None
+    kind = call.args[0].value
+    return kind if kind in {"cube", "vector"} else None
+
+
+class _SectionControlFlowValidator(ast.NodeVisitor):
+    """Reject control flow that cannot be contained by a physical section."""
+
+    def __init__(self):
+        self._loop_depth = 0
+
+    def visit_FunctionDef(self, node):
+        # Nested function control flow belongs to that function, not the section.
+        return
+
+    def visit_AsyncFunctionDef(self, node):
+        return
+
+    def visit_Lambda(self, node):
+        return
+
+    def visit_ClassDef(self, node):
+        return
+
+    def visit_Return(self, node):
+        raise PTODSLAstRewriteError("pto.section() bodies cannot return a value")
+
+    def visit_Yield(self, node):
+        raise PTODSLAstRewriteError("pto.section() bodies cannot yield a value")
+
+    def visit_YieldFrom(self, node):
+        raise PTODSLAstRewriteError("pto.section() bodies cannot yield a value")
+
+    def visit_Global(self, node):
+        raise PTODSLAstRewriteError(
+            "pto.section() bodies cannot declare global variables"
+        )
+
+    def visit_Nonlocal(self, node):
+        raise PTODSLAstRewriteError(
+            "pto.section() bodies cannot declare nonlocal variables"
+        )
+
+    def _visit_loop_body(self, body):
+        self._loop_depth += 1
+        try:
+            for body_stmt in body:
+                self.visit(body_stmt)
+        finally:
+            self._loop_depth -= 1
+
+    def visit_For(self, node):
+        self.visit(node.target)
+        self.visit(node.iter)
+        self._visit_loop_body(node.body)
+        for else_stmt in node.orelse:
+            self.visit(else_stmt)
+
+    def visit_AsyncFor(self, node):
+        self.visit_For(node)
+
+    def visit_While(self, node):
+        self.visit(node.test)
+        self._visit_loop_body(node.body)
+        for else_stmt in node.orelse:
+            self.visit(else_stmt)
+
+    def visit_Break(self, node):
+        if self._loop_depth == 0:
+            raise PTODSLAstRewriteError(
+                "break cannot escape a pto.section() body"
+            )
+
+    def visit_Continue(self, node):
+        if self._loop_depth == 0:
+            raise PTODSLAstRewriteError(
+                "continue cannot escape a pto.section() body"
+            )
+
+
+class _SectionControlBindingCollector(ast.NodeVisitor):
+    """Collect names bound by authored control-flow context managers."""
+
+    def __init__(self):
+        self.names = set()
+
+    def visit_With(self, node):
+        for item in node.items:
+            if item.optional_vars is not None:
+                self.names.update(_simple_name_targets(item.optional_vars))
+        for body_stmt in node.body:
+            self.visit(body_stmt)
+
+    def visit_For(self, node):
+        self.names.update(_simple_name_targets(node.target))
+        self.generic_visit(node)
+
+    def visit_ExceptHandler(self, node):
+        if isinstance(node.name, str):
+            self.names.add(node.name)
+        elif node.name is not None:
+            self.names.update(_simple_name_targets(node.name))
+        if node.type is not None:
+            self.visit(node.type)
+        for body_stmt in node.body:
+            self.visit(body_stmt)
+
+    def visit_FunctionDef(self, node):
+        return
+
+    def visit_AsyncFunctionDef(self, node):
+        return
+
+    def visit_Lambda(self, node):
+        return
+
+    def visit_ClassDef(self, node):
+        return
 
 
 def _is_range_call(node) -> bool:
@@ -824,6 +974,12 @@ class _ControlFlowRewriter:
     def rewrite_stmt(self, stmt, *, live_after, live_after_slots=None, allow_loop_control=False, static_iters=None):
         live_after_slots = set(live_after_slots or ())
         static_iters = dict(static_iters or {})
+        if _pto_section_kind(stmt) is not None:
+            return self._rewrite_physical_section(
+                stmt,
+                live_after_slots=live_after_slots,
+                static_iters=static_iters,
+            )
         if isinstance(stmt, ast.If):
             return self._rewrite_if(
                 stmt,
@@ -853,6 +1009,79 @@ class _ControlFlowRewriter:
                 static_iters=static_iters,
             )
         ]
+
+    def _rewrite_physical_section(self, stmt, *, live_after_slots, static_iters):
+        """Trace a physical section in a fresh Python variable environment.
+
+        A cube and a vector section are sibling physical regions.  Mutable
+        surface values produced while tracing one region must therefore not
+        become the initial loop/branch carry values of the other region.
+        """
+        validator = _SectionControlFlowValidator()
+        for body_stmt in stmt.body:
+            validator.visit(body_stmt)
+
+        slot_info = _slot_info(stmt.body, self._static_env, static_iters)
+        escaping_slots = slot_info.stores & set(live_after_slots)
+        if escaping_slots:
+            slots = ", ".join(slot.display for slot in sorted(escaping_slots))
+            raise PTODSLAstRewriteError(
+                "pto.section() bodies cannot expose mutated static subscript slots; "
+                f"use section-local scalar variables for {slots}"
+            )
+        if slot_info.invalid_stores:
+            raise PTODSLAstRewriteError(slot_info.invalid_stores[0])
+
+        body_info = _name_info(stmt.body)
+        binding_collector = _SectionControlBindingCollector()
+        for body_stmt in stmt.body:
+            binding_collector.visit(body_stmt)
+        entry_names = tuple(
+            sorted(
+                (
+                    body_info.stores
+                    & _read_before_assignment_names(stmt.body)
+                )
+                - binding_collector.names
+            )
+        )
+        helper_name = self._fresh(f"section_{_pto_section_kind(stmt)}")
+        rewritten_body = self.rewrite_block(
+            stmt.body,
+            live_after=set(),
+            live_after_slots=set(),
+            allow_loop_control=False,
+            static_iters=static_iters,
+        )
+        section_stmt = ast.With(
+            items=copy.deepcopy(stmt.items),
+            body=rewritten_body or [ast.Pass()],
+            type_comment=stmt.type_comment,
+        )
+        helper = ast.FunctionDef(
+            name=helper_name,
+            args=ast.arguments(
+                posonlyargs=[],
+                args=[ast.arg(arg=name) for name in entry_names],
+                vararg=None,
+                kwonlyargs=[],
+                kw_defaults=[],
+                kwarg=None,
+                defaults=[],
+            ),
+            body=[section_stmt],
+            decorator_list=[],
+            returns=None,
+            type_comment=None,
+        )
+        call = ast.Expr(
+            value=ast.Call(
+                func=_name(helper_name),
+                args=[_name(name) for name in entry_names],
+                keywords=[],
+            )
+        )
+        return [ast.copy_location(helper, stmt), ast.copy_location(call, stmt)]
 
     def _rewrite_nested(self, stmt, *, live_after, live_after_slots=None, allow_loop_control=False, static_iters=None):
         live_after_slots = set(live_after_slots or ())

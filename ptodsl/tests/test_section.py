@@ -10,6 +10,7 @@
 """Focused tracing coverage for explicit physical section hints."""
 
 from ptodsl import pto
+from ptodsl._ast_rewrite import PTODSLAstRewriteError
 from ptodsl._context import make_context
 from ptodsl._tracing.active import current_session
 from ptoas.mlir.ir import Module
@@ -24,6 +25,95 @@ def explicit_sections_probe():
     with pto.section("vector"):
         pto.wait_flag("MTE2", "S", event_id=0)
         pto.set_flag("S", "MTE2", event_id=event_id)
+
+
+@pto.jit(target="a5", mode="explicit")
+def ast_rewrite_section_scope_probe():
+    event_id = pto.const(1, dtype=pto.i32)
+    one = pto.const(1, dtype=pto.i32)
+    with pto.section("cube"):
+        event_id = event_id + one
+        pto.wait_flag("S", "MTE2", event_id=event_id)
+    with pto.section("vector"):
+        pto.wait_flag("MTE2", "S", event_id=event_id)
+
+
+@pto.jit(target="a5", mode="explicit", ast_rewrite=False)
+def sibling_section_escape_probe():
+    one = pto.const(1, dtype=pto.i32)
+    with pto.section("cube"):
+        escaped = one + one
+    with pto.section("vector"):
+        pto.wait_flag("MTE2", "S", event_id=escaped)
+
+
+@pto.jit(target="a5", mode="explicit", ast_rewrite=False)
+def root_section_escape_probe():
+    one = pto.const(1, dtype=pto.i32)
+    with pto.section("cube"):
+        escaped = one + one
+    pto.wait_flag("S", "MTE2", event_id=escaped)
+
+
+@pto.jit(target="a5", mode="explicit")
+def section_except_binding_probe():
+    with pto.section("vector"):
+        try:
+            raise RuntimeError("trace-time exception")
+        except RuntimeError as err:
+            str(err)
+            err = pto.const(1, dtype=pto.i32)
+            pto.wait_flag("MTE2", "S", event_id=err)
+
+
+@pto.jit(target="a5", mode="explicit")
+def section_outer_loop_break_probe():
+    for _ in pto.static_range(1):
+        with pto.section("cube"):
+            break
+
+
+@pto.jit(target="a5", mode="explicit")
+def section_outer_loop_continue_probe():
+    for _ in pto.static_range(1):
+        with pto.section("vector"):
+            continue
+
+
+@pto.jit(target="a5", mode="explicit")
+def section_inner_loop_break_probe():
+    with pto.section("cube"):
+        for _ in pto.static_range(1):
+            break
+        pto.set_flag("MTE2", "S", event_id=0)
+
+
+@pto.jit(target="a5", mode="explicit")
+def section_inner_loop_continue_probe():
+    with pto.section("vector"):
+        for _ in pto.static_range(1):
+            continue
+        pto.wait_flag("MTE2", "S", event_id=0)
+
+
+@pto.jit(target="a5", mode="explicit")
+def section_for_else_break_probe():
+    for _ in pto.static_range(1):
+        with pto.section("cube"):
+            for _ in pto.static_range(0):
+                pass
+            else:
+                break
+
+
+@pto.jit(target="a5", mode="explicit")
+def section_while_else_continue_probe():
+    for _ in pto.static_range(1):
+        with pto.section("vector"):
+            while False:
+                pass
+            else:
+                continue
 
 
 @pto.jit(target="a5", mode="explicit", ast_rewrite=False)
@@ -129,6 +219,60 @@ def main() -> None:
     with make_context() as context:
         module = Module.parse(text, context)
         module.operation.verify()
+
+    isolated_text = ast_rewrite_section_scope_probe.compile().mlir_text()
+    assert isolated_text.count("pto.section.cube {") == 1
+    assert isolated_text.count("pto.section.vector {") == 1
+    with make_context() as context:
+        module = Module.parse(isolated_text, context)
+        module.operation.verify()
+
+    _expect_raises(
+        RuntimeError,
+        lambda: sibling_section_escape_probe.compile(),
+        "defined in physical section 'cube' cannot be used in 'vector'",
+    )
+    _expect_raises(
+        RuntimeError,
+        lambda: root_section_escape_probe.compile(),
+        "defined in physical section 'cube' cannot be used in 'function root'",
+    )
+
+    except_binding_text = section_except_binding_probe.compile().mlir_text()
+    assert except_binding_text.count("pto.section.vector {") == 1
+    assert "pto.wait_flag_dyn[<PIPE_MTE2>, <PIPE_S>" in except_binding_text
+
+    inner_loop_text = section_inner_loop_break_probe.compile().mlir_text()
+    assert inner_loop_text.count("pto.section.cube {") == 1
+    assert "pto.set_flag[<PIPE_MTE2>, <PIPE_S>, <EVENT_ID0>]" in inner_loop_text
+
+    inner_loop_continue_text = section_inner_loop_continue_probe.compile().mlir_text()
+    assert inner_loop_continue_text.count("pto.section.vector {") == 1
+    assert (
+        "pto.wait_flag[<PIPE_MTE2>, <PIPE_S>, <EVENT_ID0>]"
+        in inner_loop_continue_text
+    )
+
+    _expect_raises(
+        PTODSLAstRewriteError,
+        lambda: section_outer_loop_break_probe.compile(),
+        "break cannot escape a pto.section() body",
+    )
+    _expect_raises(
+        PTODSLAstRewriteError,
+        lambda: section_outer_loop_continue_probe.compile(),
+        "continue cannot escape a pto.section() body",
+    )
+    _expect_raises(
+        PTODSLAstRewriteError,
+        lambda: section_for_else_break_probe.compile(),
+        "break cannot escape a pto.section() body",
+    )
+    _expect_raises(
+        PTODSLAstRewriteError,
+        lambda: section_while_else_continue_probe.compile(),
+        "continue cannot escape a pto.section() body",
+    )
 
     recovered_text = recovered_section_probe.compile().mlir_text()
     assert recovered_text.count("pto.section.cube {") == 1

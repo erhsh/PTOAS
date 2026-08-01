@@ -229,6 +229,22 @@ class TraceSession:
             owner = owner.operation.parent
         return None
 
+    @staticmethod
+    def _value_physical_section(value):
+        """Return the physical section that owns an SSA value, if any."""
+        owner = getattr(value, "owner", None)
+        if owner is None:
+            return None
+        operation = getattr(owner, "operation", owner)
+        if not hasattr(operation, "name"):
+            operation = getattr(operation, "owner", None)
+            operation = getattr(operation, "operation", operation)
+        while operation is not None:
+            if operation.name in {"pto.section.cube", "pto.section.vector"}:
+                return operation
+            operation = operation.parent
+        return None
+
     def _existing_physical_section_kinds(self) -> set[str]:
         kinds = set()
         for op in self._walk_op_tree(self.current_function.body.blocks[0].operations):
@@ -296,7 +312,29 @@ class TraceSession:
             self._active_physical_sections.remove(function_key)
 
     def validate_surface_value_access(self, value) -> None:
-        """Reject inline-subkernel SSA values that escaped their outlined helper body."""
+        """Reject SSA values that escaped their physical tracing region."""
+        defining_section = self._value_physical_section(value)
+        if defining_section is not None:
+            current_section_block = self._enclosing_physical_section()
+            current_section = (
+                current_section_block.operation
+                if current_section_block is not None
+                else None
+            )
+            if current_section is None or current_section != defining_section:
+                defined_in = defining_section.name.removeprefix("pto.section.")
+                used_in = (
+                    current_section.name.removeprefix("pto.section.")
+                    if current_section is not None
+                    else "function root"
+                )
+                raise RuntimeError(
+                    "PTO SSA value defined in physical section "
+                    f"{defined_in!r} cannot be used in {used_in!r}; "
+                    "physical section values cannot escape to a sibling "
+                    "section or the function root"
+                )
+
         try:
             record = self._escaped_inline_values.get(value)
         except TypeError:

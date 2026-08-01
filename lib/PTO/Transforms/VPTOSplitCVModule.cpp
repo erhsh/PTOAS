@@ -168,6 +168,46 @@ static LogicalResult verifyNoNestedSections(ModuleOp module) {
   return status;
 }
 
+static Operation *enclosingPhysicalSection(Operation *op) {
+  while (op) {
+    if (isa<SectionCubeOp, SectionVectorOp>(op))
+      return op;
+    op = op->getParentOp();
+  }
+  return nullptr;
+}
+
+static Operation *enclosingPhysicalSection(Value value) {
+  if (Operation *definingOp = value.getDefiningOp())
+    return enclosingPhysicalSection(definingOp);
+  auto blockArgument = dyn_cast<BlockArgument>(value);
+  if (!blockArgument)
+    return nullptr;
+  return enclosingPhysicalSection(blockArgument.getOwner()->getParentOp());
+}
+
+static LogicalResult verifyNoCrossSectionSSAUses(ModuleOp module) {
+  LogicalResult status = success();
+  module.walk([&](Operation *op) {
+    if (failed(status))
+      return WalkResult::interrupt();
+    Operation *useSection = enclosingPhysicalSection(op);
+    for (Value operand : op->getOperands()) {
+      Operation *defSection = enclosingPhysicalSection(operand);
+      if (!defSection || defSection == useSection)
+        continue;
+      auto diagnostic = op->emitError(
+          "uses an SSA value defined in a different physical section");
+      diagnostic.attachNote(operand.getLoc())
+          << "value is defined in " << defSection->getName();
+      status = failure();
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return status;
+}
+
 static void eraseUnusedSimtEntries(ModuleOp module) {
   SmallVector<ModuleOp> symbolTables{module};
   module.walk([&](ModuleOp nested) {
@@ -302,6 +342,8 @@ static LogicalResult materializeExplicitKernelKindSections(ModuleOp module) {
 
 static LogicalResult splitCVModule(ModuleOp module) {
   flattenSingleUnpartitionedChild(module);
+  if (failed(verifyNoCrossSectionSSAUses(module)))
+    return failure();
   if (hasKernelKind(module))
     return materializeExplicitKernelKindSections(module);
   if (hasKernelKindChildModule(module)) {
