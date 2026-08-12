@@ -3242,6 +3242,15 @@ def public_data_movement_surface_probe():
         dst_group=(1, 0, 0, 0),
         ctrl=(0, False),
     )
+    pto.mte_fill_l1(
+        l1_dst,
+        0,
+        byte_offset=32,
+        repeat_times=2,
+        block_num_32b=4,
+        dst_gap_32b=1,
+        fill_word_bits=16,
+    )
     pto.mte_l1_bt(l1_dst, bias_dst, 8, nburst=(1, 0, 0))
     pto.mte_l1_fb(l1_dst, scaling_dst, 8, nburst=(1, 0, 0))
 
@@ -3806,6 +3815,7 @@ def main() -> None:
         "mte_gm_l1",
         "mte_l1_ub",
         "mte_gm_l1_frac",
+        "mte_fill_l1",
         "mte_l1_bt",
         "mte_l1_fb",
         "vldsx2",
@@ -6837,6 +6847,7 @@ def main() -> None:
     expect("pto.mte_gm_l1" in data_movement_surface_text, "public grouped GM->L1 wrapper should lower to pto.mte_gm_l1")
     expect("pto.mte_l1_ub" in data_movement_surface_text, "public grouped L1->UB wrapper should lower to pto.mte_l1_ub")
     expect("pto.mte_gm_l1_frac" in data_movement_surface_text, "public GM->L1 frac wrapper should lower to pto.mte_gm_l1_frac")
+    expect("pto.mte_fill_l1" in data_movement_surface_text, "public L1 fill wrapper should lower to pto.mte_fill_l1")
     expect("pto.mte_l1_bt" in data_movement_surface_text, "public L1->BT wrapper should lower to pto.mte_l1_bt")
     expect("pto.mte_l1_fb" in data_movement_surface_text, "public L1->FB wrapper should lower to pto.mte_l1_fb")
     expect("pto.vldas" in data_movement_surface_text, "vldas(...) should lower to pto.vldas")

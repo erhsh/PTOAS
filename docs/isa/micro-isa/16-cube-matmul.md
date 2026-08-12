@@ -397,6 +397,61 @@ pto.mte_l1_ub %l1_src, %ub_dst, %c64_i64
 
 ---
 
+### `pto.mte_fill_l1`
+
+- **syntax:**
+```mlir
+pto.mte_fill_l1 %dst, %byte_offset, %raw_value, %repeat_times,
+  %block_num_32b, %dst_gap_32b, fill_word_bits
+  : !pto.ptr<T, l1>, i64, i64, i64, i64, i64
+```
+- **semantics:** Fill a strided L1 region with a repeated 16-bit or 32-bit
+  word. The destination address is `%dst + %byte_offset`. Each repeat writes
+  `%block_num_32b` consecutive 32-byte blocks, then skips `%dst_gap_32b`
+  32-byte blocks before the next repeat.
+
+**Parameter Table:**
+
+| Parameter | Width | Description |
+|-----------|-------|-------------|
+| `%dst` | ptr | L1 destination base pointer |
+| `%byte_offset` | i64 | Non-negative byte offset from `%dst` to the first written byte |
+| `%raw_value` | i64 | Raw repeated word; the low `fill_word_bits` bits are used |
+| `%repeat_times` | i64 | Number of repeated fill regions |
+| `%block_num_32b` | i64 | Number of consecutive 32-byte blocks written per repeat |
+| `%dst_gap_32b` | i64 | Number of skipped 32-byte blocks between repeats |
+| `fill_word_bits` | integer attribute | Repeated word width: `16` or `32` |
+
+Reference behavior:
+
+```text
+word = low_bits(raw_value, fill_word_bits)
+for r in 0 .. repeat_times-1:
+  repeat_start = byte_offset + r * (block_num_32b + dst_gap_32b) * 32
+  fill dst[repeat_start : repeat_start + block_num_32b * 32] with word
+```
+
+**Constraints:**
+
+- `%dst` must be in the `l1` address space.
+- `%byte_offset` must be non-negative.
+- `%repeat_times`, `%block_num_32b`, and `%dst_gap_32b` must each be in
+  `[0, 32767]`.
+- `fill_word_bits` must be `16` or `32`.
+
+**Example:**
+
+```mlir
+pto.mte_fill_l1 %l1, %c32_i64, %zero_i64, %c2_i64,
+  %c4_i64, %c1_i64, 16
+  : !pto.ptr<f16, l1>, i64, i64, i64, i64, i64
+```
+
+This fills four 32-byte blocks starting at byte offset 32, skips one 32-byte
+block, then fills another four blocks with 16-bit zero words.
+
+---
+
 ### `pto.mte_gm_l1_frac`
 
 - **syntax:**

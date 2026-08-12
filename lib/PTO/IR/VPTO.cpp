@@ -7677,6 +7677,38 @@ void MteGmL1FracOp::getEffects(
   effects.emplace_back(MemoryEffects::Write::get(), &getDestinationMutable());
 }
 
+LogicalResult MteFillL1Op::verify() {
+  constexpr uint64_t kMaxFillConfigField = 0x7fff;
+  auto ptrType = dyn_cast<pto::PtrType>(getDestination().getType());
+  if (!ptrType || ptrType.getMemorySpace().getAddressSpace() != AddressSpace::MAT)
+    return emitOpError("requires destination in mat address space");
+  if (getFillWordBits() != 16 && getFillWordBits() != 32)
+    return emitOpError("fill_word_bits must be 16 or 32");
+
+  auto checkConfigField = [&](Value value, StringRef name) -> LogicalResult {
+    APInt intValue;
+    if (matchPattern(value, m_ConstantInt(&intValue)) &&
+        (intValue.isNegative() || intValue.ugt(kMaxFillConfigField)))
+      return emitOpError() << name << " must be in range [0, 32767]";
+    return success();
+  };
+  APInt byteOffset;
+  if (matchPattern(getByteOffset(), m_ConstantInt(&byteOffset)) &&
+      byteOffset.isNegative())
+    return emitOpError("byte_offset must be non-negative");
+  if (failed(checkConfigField(getRepeatTimes(), "repeat_times")) ||
+      failed(checkConfigField(getBlockNum_32b(), "block_num_32b")) ||
+      failed(checkConfigField(getDstGap_32b(), "dst_gap_32b")))
+    return failure();
+  return success();
+}
+
+void MteFillL1Op::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Write::get(), &getDestinationMutable());
+}
+
 ParseResult MteL0cL1Op::parse(OpAsmParser &parser, OperationState &result) {
   Builder builder(parser.getContext());
   StructuredAccStoreAsmState state;

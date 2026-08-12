@@ -1308,6 +1308,33 @@ def PTO_CopyGmToCbufMultiDn2NzOp : PTO_MteOp<"copy_gm_to_cbuf_multi_dn2nz"> {
   }];
 }
 
+def PTO_MteFillL1Op : PTO_MteOp<"mte_fill_l1", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+  ]> {
+  let summary = "Fill a strided L1 region with a repeated 16/32-bit pattern";
+
+  let arguments = (ins
+    PTO_BufferType:$destination,
+    I64:$byte_offset,
+    I64:$raw_value,
+    I64:$repeat_times,
+    I64:$block_num_32b,
+    I64:$dst_gap_32b,
+    I64Attr:$fill_word_bits
+  );
+
+  let results = (outs);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $destination `,` $byte_offset `,` $raw_value `,` $repeat_times `,`
+    $block_num_32b `,` $dst_gap_32b `,` $fill_word_bits
+    attr-dict `:` type($destination) `,` type($byte_offset) `,`
+    type($raw_value) `,` type($repeat_times) `,` type($block_num_32b) `,`
+    type($dst_gap_32b)
+  }];
+}
+
 def PTO_CopyCbufToBtOp : PTO_MteOp<"copy_cbuf_to_bt"> {
   let arguments = (ins
     PTO_BufferType:$source,

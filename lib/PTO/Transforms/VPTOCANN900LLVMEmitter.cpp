@@ -5289,6 +5289,63 @@ private:
   LoweringState &state;
 };
 
+class LowerMteFillL1OpPattern final
+    : public OpConversionPattern<pto::MteFillL1Op> {
+public:
+  explicit LowerMteFillL1OpPattern(TypeConverter &typeConverter,
+                                   MLIRContext *context, LoweringState &state)
+      : OpConversionPattern<pto::MteFillL1Op>(typeConverter, context),
+        state(state) {}
+
+  LogicalResult matchAndRewrite(pto::MteFillL1Op op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    Value destinationRaw = adaptor.getDestination();
+    if (!destinationRaw || !isa<LLVM::LLVMPointerType>(destinationRaw.getType()))
+      return rewriter.notifyMatchFailure(op, "expected converted MAT pointer");
+    FailureOr<Value> destination = reinterpretPointerToAddrSpace(
+        op, destinationRaw, static_cast<unsigned>(pto::AddressSpace::MAT));
+    if (failed(destination))
+      return rewriter.notifyMatchFailure(op, "failed to map MAT pointer space");
+
+    Type i64Ty = rewriter.getI64Type();
+    Value base = rewriter.create<LLVM::PtrToIntOp>(op.getLoc(), i64Ty, *destination);
+    Value byteOffset = castIntegerLikeTo(op, adaptor.getByteOffset(), i64Ty);
+    Value address = rewriter.create<arith::AddIOp>(op.getLoc(), base, byteOffset);
+    Value pointer = rewriter.create<LLVM::IntToPtrOp>(
+        op.getLoc(), destination->getType(), address);
+    Value fieldMask = getI64Constant(rewriter, op.getLoc(), 0x7fff);
+    auto maskConfigField = [&](Value value) -> Value {
+      return rewriter.create<arith::AndIOp>(
+          op.getLoc(), castIntegerLikeTo(op, value, i64Ty), fieldMask);
+    };
+    Value config = maskConfigField(adaptor.getRepeatTimes());
+    config = rewriter.create<arith::OrIOp>(
+        op.getLoc(), config,
+        rewriter.create<arith::ShLIOp>(
+            op.getLoc(), maskConfigField(adaptor.getBlockNum_32b()),
+            getI64Constant(rewriter, op.getLoc(), 16)));
+    config = rewriter.create<arith::OrIOp>(
+        op.getLoc(), config,
+        rewriter.create<arith::ShLIOp>(
+            op.getLoc(), maskConfigField(adaptor.getDstGap_32b()),
+            getI64Constant(rewriter, op.getLoc(), 32)));
+    Value rawValue = castIntegerLikeTo(op, adaptor.getRawValue(), i64Ty);
+    StringRef suffix = op.getFillWordBits() == 16 ? ".v3.u16" : ".v3.u32";
+    StringRef calleeName = StringAttr::get(
+        op.getContext(), "llvm.hivm.CREATE.CBUF.MATRIX" + suffix).getValue();
+    auto funcType = rewriter.getFunctionType(
+        TypeRange{pointer.getType(), i64Ty, i64Ty}, TypeRange{});
+    rewriter.create<func::CallOp>(op.getLoc(), calleeName, TypeRange{},
+                                  ValueRange{pointer, config, rawValue});
+    state.plannedDecls.push_back(PlannedDecl{calleeName.str(), funcType});
+    rewriter.eraseOp(op);
+    return success();
+  }
+
+private:
+  LoweringState &state;
+};
+
 class LowerCopyCbufToBtOpPattern final
     : public OpConversionPattern<pto::CopyCbufToBtOp> {
 public:
@@ -11026,6 +11083,7 @@ static void populateVPTOOpLoweringPatterns(VPTOTypeConverter &typeConverter,
                LowerCopyCbufToBtOpPattern, LowerCopyCbufToFbufOpPattern,
                LowerCopyGmToCbufMultiOpPattern<pto::CopyGmToCbufMultiNd2NzOp>,
                LowerCopyGmToCbufMultiOpPattern<pto::CopyGmToCbufMultiDn2NzOp>,
+               LowerMteFillL1OpPattern,
                LowerMadRawPattern<pto::MadRawOp>,
                LowerMadRawPattern<pto::MadBiasRawOp>,
                LowerMadRawPattern<pto::MadMxRawOp>,
@@ -11090,7 +11148,8 @@ static void configureVPTOOpLoweringTarget(ConversionTarget &target,
                       pto::SetStoreAtomicCfgOp,
                       pto::SetAtomicS32Op, pto::SetAtomicS8Op, pto::SetCtrlOp,
                       pto::StoreVfSimtInfoOp,
-                      pto::SetMovPadValOp, pto::SetQuantPreOp>();
+                      pto::SetMovPadValOp, pto::SetQuantPreOp,
+                      pto::MteFillL1Op>();
   target.addIllegalOp<pto::Sbitset0Op, pto::Sbitset1Op>();
   target.addIllegalOp<pto::VldsOp, pto::Vldsx2Op, pto::VsldbOp,
                       pto::VldasOp, pto::InitAlignOp, pto::VldusOp,

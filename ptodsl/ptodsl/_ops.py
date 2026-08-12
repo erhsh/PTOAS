@@ -5297,6 +5297,8 @@ def mte_gm_l1_frac(source, destination, mode, *, shape, src_layout, dst_group, c
         src_layout,
         context="mte_gm_l1_frac(...)",
     )
+
+
     group_count, dst_loop2_stride, dst_loop3_stride, dst_loop4_stride = _normalize_frac_dst_group(
         dst_group,
         context="mte_gm_l1_frac(...)",
@@ -5316,6 +5318,31 @@ def mte_gm_l1_frac(source, destination, mode, *, shape, src_layout, dst_group, c
         smallc0_en,
         _cube_load_frac_mode_attr(mode),
         src_outer_stride=src_outer_stride,
+    )
+
+
+@_explicit_mode_only("pto.mte_fill_l1(...)")
+def mte_fill_l1(
+    destination,
+    raw_value,
+    *,
+    byte_offset,
+    repeat_times,
+    block_num_32b,
+    dst_gap_32b,
+    fill_word_bits=16,
+):
+    """Fill a strided MAT/L1 region using the cube MTE2 fill instruction."""
+    if fill_word_bits not in (16, 32):
+        raise ValueError("mte_fill_l1 fill_word_bits must be 16 or 32")
+    _pto.MteFillL1Op(
+        unwrap_surface_value(destination),
+        _coerce_i64(byte_offset, context="mte_fill_l1 byte_offset"),
+        _coerce_i64(raw_value, context="mte_fill_l1 raw_value"),
+        _coerce_i64(repeat_times, context="mte_fill_l1 repeat_times"),
+        _coerce_i64(block_num_32b, context="mte_fill_l1 block_num_32b"),
+        _coerce_i64(dst_gap_32b, context="mte_fill_l1 dst_gap_32b"),
+        fill_word_bits,
     )
 
 
@@ -6760,7 +6787,7 @@ __all__ = [
     "chistv2",
     "as_ptr",
     "mte_load", "mte_store", "mte_gm_ub", "mte_ub_gm", "mte_ub_ub", "mte_ub_l1",
-    "mte_gm_l1", "mte_l1_ub", "mte_gm_l1_frac", "mte_l1_bt", "mte_l1_fb", "mem_bar",
+    "mte_gm_l1", "mte_l1_ub", "mte_gm_l1_frac", "mte_fill_l1", "mte_l1_bt", "mte_l1_fb", "mem_bar",
     "set_store_atomic_cfg",
     "set_atomic_add", "set_atomic_max", "set_atomic_min", "set_atomic_none",
     "set_atomic_f32", "set_atomic_f16", "set_atomic_bf16",

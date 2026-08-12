@@ -1,0 +1,98 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: split-file %s %t
+// RUN: ptoas --cann-output-version=9.0.0 --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %t/max.pto -o /dev/null
+// RUN: not ptoas --cann-output-version=9.0.0 --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %t/repeat-negative.pto -o - 2>&1 | FileCheck %s --check-prefix=REPEAT
+// RUN: not ptoas --cann-output-version=9.0.0 --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %t/repeat-overflow.pto -o - 2>&1 | FileCheck %s --check-prefix=REPEAT
+// RUN: not ptoas --cann-output-version=9.0.0 --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %t/blocks-negative.pto -o - 2>&1 | FileCheck %s --check-prefix=BLOCKS
+// RUN: not ptoas --cann-output-version=9.0.0 --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %t/blocks-overflow.pto -o - 2>&1 | FileCheck %s --check-prefix=BLOCKS
+// RUN: not ptoas --cann-output-version=9.0.0 --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %t/gap-negative.pto -o - 2>&1 | FileCheck %s --check-prefix=GAP
+// RUN: not ptoas --cann-output-version=9.0.0 --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %t/gap-overflow.pto -o - 2>&1 | FileCheck %s --check-prefix=GAP
+
+// REPEAT: repeat_times must be in range [0, 32767]
+// BLOCKS: block_num_32b must be in range [0, 32767]
+// GAP: dst_gap_32b must be in range [0, 32767]
+
+//--- max.pto
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @max_fields() attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %max = arith.constant 32767 : i64
+    %dst = pto.castptr %c0 : i64 -> !pto.ptr<ui16, l1>
+    pto.mte_fill_l1 %dst, %c0, %c0, %max, %max, %max, 16
+      : !pto.ptr<ui16, l1>, i64, i64, i64, i64, i64
+    return
+  }
+}
+
+//--- repeat-negative.pto
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @test() attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %bad = arith.constant -1 : i64
+    %dst = pto.castptr %c0 : i64 -> !pto.ptr<ui16, l1>
+    pto.mte_fill_l1 %dst, %c0, %c0, %bad, %c0, %c0, 16 : !pto.ptr<ui16, l1>, i64, i64, i64, i64, i64
+    return
+  }
+}
+
+//--- repeat-overflow.pto
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @test() attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %bad = arith.constant 32768 : i64
+    %dst = pto.castptr %c0 : i64 -> !pto.ptr<ui16, l1>
+    pto.mte_fill_l1 %dst, %c0, %c0, %bad, %c0, %c0, 16 : !pto.ptr<ui16, l1>, i64, i64, i64, i64, i64
+    return
+  }
+}
+
+//--- blocks-negative.pto
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @test() attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %bad = arith.constant -1 : i64
+    %dst = pto.castptr %c0 : i64 -> !pto.ptr<ui16, l1>
+    pto.mte_fill_l1 %dst, %c0, %c0, %c0, %bad, %c0, 16 : !pto.ptr<ui16, l1>, i64, i64, i64, i64, i64
+    return
+  }
+}
+
+//--- blocks-overflow.pto
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @test() attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %bad = arith.constant 32768 : i64
+    %dst = pto.castptr %c0 : i64 -> !pto.ptr<ui16, l1>
+    pto.mte_fill_l1 %dst, %c0, %c0, %c0, %bad, %c0, 16 : !pto.ptr<ui16, l1>, i64, i64, i64, i64, i64
+    return
+  }
+}
+
+//--- gap-negative.pto
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @test() attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %bad = arith.constant -1 : i64
+    %dst = pto.castptr %c0 : i64 -> !pto.ptr<ui16, l1>
+    pto.mte_fill_l1 %dst, %c0, %c0, %c0, %c0, %bad, 16 : !pto.ptr<ui16, l1>, i64, i64, i64, i64, i64
+    return
+  }
+}
+
+//--- gap-overflow.pto
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @test() attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %bad = arith.constant 32768 : i64
+    %dst = pto.castptr %c0 : i64 -> !pto.ptr<ui16, l1>
+    pto.mte_fill_l1 %dst, %c0, %c0, %c0, %c0, %bad, 16 : !pto.ptr<ui16, l1>, i64, i64, i64, i64, i64
+    return
+  }
+}
