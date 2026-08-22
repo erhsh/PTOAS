@@ -1070,11 +1070,19 @@ def _is_range_call(node) -> bool:
     return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "range"
 
 
+def _is_unroll_range_call(node) -> bool:
+    return _is_pto_attr_call(node, "unroll_range")
+
+
 def _range_triplet(call):
-    if not _is_range_call(call):
-        raise PTODSLAstRewriteError("ast_rewrite=True only rewrites for-loops over range(...)")
+    if not (_is_range_call(call) or _is_unroll_range_call(call)):
+        raise PTODSLAstRewriteError(
+            "ast_rewrite=True only rewrites for-loops over range(...) or pto.unroll_range(...)"
+        )
     if call.keywords:
-        raise PTODSLAstRewriteError("ast_rewrite=True range(...) loops do not support keyword arguments")
+        raise PTODSLAstRewriteError(
+            "ast_rewrite=True range loops do not support keyword arguments"
+        )
     args = call.args
     if len(args) == 1:
         return ast.Constant(0), args[0], ast.Constant(1)
@@ -1082,7 +1090,14 @@ def _range_triplet(call):
         return args[0], args[1], ast.Constant(1)
     if len(args) == 3:
         return args[0], args[1], args[2]
-    raise PTODSLAstRewriteError("ast_rewrite=True range(...) loops require 1 to 3 arguments")
+    raise PTODSLAstRewriteError("ast_rewrite=True range loops require 1 to 3 arguments")
+
+
+def _for_call_keywords(call, step):
+    keywords = [ast.keyword(arg="step", value=step)]
+    if _is_unroll_range_call(call):
+        keywords.append(ast.keyword(arg="unroll", value=ast.Constant("full")))
+    return keywords
 
 
 def _pto_attr(name: str, ctx=ast.Load()):
@@ -2059,6 +2074,12 @@ class _ControlFlowRewriter:
             return [stmt]
 
         control = _loop_control_flags(stmt.body)
+        if _is_unroll_range_call(stmt.iter) and (
+            stmt.orelse or control["break"] or control["continue"]
+        ):
+            raise PTODSLAstRewriteError(
+                "pto.unroll_range(...) does not support for-else, break, or continue"
+            )
         if stmt.orelse or control["break"] or control["continue"]:
             return self._rewrite_controlled_for(
                 stmt,
@@ -2175,7 +2196,7 @@ class _ControlFlowRewriter:
                         value=ast.Call(
                             func=_pto_attr("for_"),
                             args=[start, stop],
-                            keywords=[ast.keyword(arg="step", value=step)],
+                            keywords=_for_call_keywords(stmt.iter, step),
                         ),
                         attr="carry",
                         ctx=ast.Load(),
@@ -2287,7 +2308,7 @@ class _ControlFlowRewriter:
                     context_expr=ast.Call(
                         func=_pto_attr("for_"),
                         args=[start, stop],
-                        keywords=[ast.keyword(arg="step", value=step)],
+                        keywords=_for_call_keywords(stmt.iter, step),
                     ),
                     optional_vars=_name(stmt.target.id, ast.Store()),
                 )
