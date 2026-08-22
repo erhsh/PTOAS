@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --simt-auto-unroll=analyze %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=ANALYZE
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --simt-auto-unroll=off --mlir-print-ir-after=pto-unroll-simt-for %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=OFF
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --simt-auto-unroll=on --mlir-print-ir-after=pto-unroll-simt-for %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=ON
+// RUN: not ptoas --simt-auto-unroll=invalid %S/backend_cli_override.pto -o %t 2>&1 | FileCheck %s --check-prefix=INVALID-CLI
+// RUN: not pto-test-opt %S/backend_cli_override.pto '-pto-unroll-simt-for=mode=invalid' 2>&1 | FileCheck %s --check-prefix=INVALID-PASS
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @auto_unroll_cost_model(%dst: !pto.ptr<i32, ub>) attributes {pto.entry} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c4 = arith.constant 4 : index
+    %c128 = arith.constant 128 : index
+    pto.section.simt<<<32, 1, 1>>> {
+      "scf.for"(%c0, %c4, %c1) ({
+      ^bb0(%i: index):
+        %value = arith.index_cast %i : index to i32
+        pto.store %value, %dst[%i] : !pto.ptr<i32, ub>, i32
+        scf.yield
+      }) {pto.unroll = "auto"} : (index, index, index) -> ()
+    }
+    pto.section.simt<<<32, 1, 1>>> {
+      "scf.for"(%c0, %c128, %c1) ({
+      ^bb0(%i: index):
+        %value = arith.index_cast %i : index to i32
+        pto.store %value, %dst[%i] : !pto.ptr<i32, ub>, i32
+        scf.yield
+      }) {pto.unroll = "auto"} : (index, index, index) -> ()
+    }
+    return
+  }
+}
+
+// ANALYZE-DAG: PTOUnrollSIMTFor auto trip=4{{.*}}decision=keep reason=not-profitable
+// ANALYZE-DAG: PTOUnrollSIMTFor auto trip=128{{.*}}decision=unroll reason=profitable
+// OFF: pto.unroll = "auto"
+// ON-COUNT-1: pto.unroll = "auto"
+// INVALID-CLI: for the --simt-auto-unroll option: Cannot find option named 'invalid'!
+// INVALID-PASS: invalid auto-unroll mode 'invalid'; expected off, analyze, or on

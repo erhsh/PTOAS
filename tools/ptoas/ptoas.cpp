@@ -60,6 +60,7 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/InliningUtils.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/ADT/DenseMap.h"
@@ -485,6 +486,7 @@ static LogicalResult reorderEmitCFunctions(ModuleOp module) {
 // Command Line Options
 // --------------------------------------------------------------------------
 enum class VPTOSchedulerCLIMode { Off, Analyze, On };
+enum class SimtAutoUnrollCLIMode { Off, Analyze, On };
 
 static llvm::cl::opt<VPTOSchedulerCLIMode> vptoSchedulerMode(
     "vpto-scheduler",
@@ -495,6 +497,40 @@ static llvm::cl::opt<VPTOSchedulerCLIMode> vptoSchedulerMode(
                    "Report scheduling analysis without changing IR"),
         clEnumValN(VPTOSchedulerCLIMode::On, "on", "Run scheduler in on mode")),
     llvm::cl::init(VPTOSchedulerCLIMode::Off));
+
+static llvm::cl::opt<SimtAutoUnrollCLIMode> simtAutoUnrollMode(
+    "simt-auto-unroll", llvm::cl::desc("SIMT auto-unroll mode"),
+    llvm::cl::values(
+        clEnumValN(SimtAutoUnrollCLIMode::Off, "off", "Disable auto unrolling"),
+        clEnumValN(SimtAutoUnrollCLIMode::Analyze, "analyze",
+                   "Report auto-unroll analysis without changing IR"),
+        clEnumValN(SimtAutoUnrollCLIMode::On, "on", "Enable auto unrolling")),
+    llvm::cl::init(SimtAutoUnrollCLIMode::On));
+
+static llvm::StringRef getSimtAutoUnrollModeName() {
+  switch (simtAutoUnrollMode) {
+  case SimtAutoUnrollCLIMode::Off:
+    return "off";
+  case SimtAutoUnrollCLIMode::Analyze:
+    return "analyze";
+  case SimtAutoUnrollCLIMode::On:
+    return "on";
+  default:
+    llvm_unreachable("invalid SIMT auto-unroll CLI mode");
+  }
+}
+static llvm::cl::opt<int64_t> simtAutoUnrollMaxTripCount(
+    "simt-auto-unroll-max-trip-count",
+    llvm::cl::desc("Safety ceiling for SIMT auto-unroll trip count"),
+    llvm::cl::init(256));
+static llvm::cl::opt<int64_t> simtAutoUnrollMaxExpandedOps(
+    "simt-auto-unroll-max-expanded-ops",
+    llvm::cl::desc("Maximum estimated operations after SIMT auto unrolling"),
+    llvm::cl::init(8192));
+static llvm::cl::opt<int64_t> simtAutoUnrollMaxPressure(
+    "simt-auto-unroll-max-pressure",
+    llvm::cl::desc("Maximum structural pressure estimate for SIMT auto unrolling"),
+    llvm::cl::init(256));
 
 static llvm::cl::opt<bool> enableInsertSync("enable-insert-sync",
                                             llvm::cl::desc("Enable automatic synchronization insertion pass"),
@@ -3070,8 +3106,13 @@ static void prepareVPTOForEmission(PassManager &pm) {
   // backend checks catch any illegal barrier that still leaks through.
   kernelModulePM.addNestedPass<func::FuncOp>(
       pto::createLoweringSyncToPipePass());
+  pto::PTOUnrollSIMTForOptions unrollOptions;
+  unrollOptions.mode = getSimtAutoUnrollModeName();
+  unrollOptions.maxAutoTripCount = simtAutoUnrollMaxTripCount;
+  unrollOptions.maxAutoExpandedOps = simtAutoUnrollMaxExpandedOps;
+  unrollOptions.maxAutoPressure = simtAutoUnrollMaxPressure;
   kernelModulePM.addNestedPass<func::FuncOp>(
-      pto::createPTOUnrollSIMTForPass());
+      pto::createPTOUnrollSIMTForPass(unrollOptions));
   kernelModulePM.addPass(createSCCPPass());
   kernelModulePM.addPass(createCanonicalizerPass());
   kernelModulePM.addPass(createCSEPass());

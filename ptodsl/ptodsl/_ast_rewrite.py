@@ -1070,11 +1070,37 @@ def _is_range_call(node) -> bool:
     return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "range"
 
 
+def _is_runtime_range_call(node) -> bool:
+    return _is_pto_attr_call(node, "runtime_range")
+
+
+def _runtime_range_unroll(call):
+    if not _is_runtime_range_call(call):
+        return None
+    unknown = [keyword.arg for keyword in call.keywords if keyword.arg != "unroll"]
+    if unknown:
+        raise PTODSLAstRewriteError(
+            f"pto.runtime_range(...) does not support keyword argument {unknown[0]!r}"
+        )
+    hints = [keyword.value for keyword in call.keywords if keyword.arg == "unroll"]
+    if not hints:
+        return None
+    if len(hints) != 1 or not isinstance(hints[0], ast.Constant) or hints[0].value not in (None, "auto"):
+        raise PTODSLAstRewriteError(
+            "pto.runtime_range(..., unroll=...) expects None or 'auto'"
+        )
+    return hints[0].value
+
+
 def _range_triplet(call):
-    if not _is_range_call(call):
-        raise PTODSLAstRewriteError("ast_rewrite=True only rewrites for-loops over range(...)")
-    if call.keywords:
+    if not (_is_range_call(call) or _is_runtime_range_call(call)):
+        raise PTODSLAstRewriteError(
+            "ast_rewrite=True only rewrites for-loops over range(...) or pto.runtime_range(...)"
+        )
+    if _is_range_call(call) and call.keywords:
         raise PTODSLAstRewriteError("ast_rewrite=True range(...) loops do not support keyword arguments")
+    if _is_runtime_range_call(call):
+        _runtime_range_unroll(call)
     args = call.args
     if len(args) == 1:
         return ast.Constant(0), args[0], ast.Constant(1)
@@ -2059,6 +2085,11 @@ class _ControlFlowRewriter:
             return [stmt]
 
         control = _loop_control_flags(stmt.body)
+        unroll_hint = _runtime_range_unroll(stmt.iter)
+        if unroll_hint is not None and (stmt.orelse or control["break"] or control["continue"]):
+            raise PTODSLAstRewriteError(
+                "pto.runtime_range(..., unroll=\"auto\") does not support break, continue, or loop else"
+            )
         if stmt.orelse or control["break"] or control["continue"]:
             return self._rewrite_controlled_for(
                 stmt,
@@ -2175,7 +2206,10 @@ class _ControlFlowRewriter:
                         value=ast.Call(
                             func=_pto_attr("for_"),
                             args=[start, stop],
-                            keywords=[ast.keyword(arg="step", value=step)],
+                            keywords=[ast.keyword(arg="step", value=step)] + (
+                                [ast.keyword(arg="unroll", value=ast.Constant(unroll_hint))]
+                                if unroll_hint is not None else []
+                            ),
                         ),
                         attr="carry",
                         ctx=ast.Load(),
@@ -2287,7 +2321,10 @@ class _ControlFlowRewriter:
                     context_expr=ast.Call(
                         func=_pto_attr("for_"),
                         args=[start, stop],
-                        keywords=[ast.keyword(arg="step", value=step)],
+                        keywords=[ast.keyword(arg="step", value=step)] + (
+                            [ast.keyword(arg="unroll", value=ast.Constant(unroll_hint))]
+                            if unroll_hint is not None else []
+                        ),
                     ),
                     optional_vars=_name(stmt.target.id, ast.Store()),
                 )

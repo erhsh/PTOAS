@@ -17,6 +17,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
@@ -183,20 +184,215 @@ static void printCoverage(llvm::raw_ostream &os,
   for (const auto &entry : coverage.unclassifiedOps)
     unclassified.emplace_back(entry.getKey().str(), entry.getValue());
   llvm::sort(unclassified);
-  for (const auto &[name, count] : unclassified)
+  for (const auto &[name, count] : unclassified) {
     os << "vpto-scheduler: unclassified-op=" << name << " count=" << count
        << '\n';
+  }
+}
+
+struct ScheduledCandidate {
+  VPTOSUnit *unit = nullptr;
+  unsigned cycle = 0;
+  unsigned pressureExcess = 0;
+  double pressureDelta = 0.0;
+};
+
+static bool isBetterCandidate(const ScheduledCandidate &lhs,
+                              const ScheduledCandidate &rhs) {
+  if (!rhs.unit) {
+    return true;
+  }
+  if (lhs.cycle != rhs.cycle) {
+    return lhs.cycle < rhs.cycle;
+  }
+  if (lhs.pressureExcess != rhs.pressureExcess) {
+    return lhs.pressureExcess < rhs.pressureExcess;
+  }
+  const bool heightsDiffer = lhs.unit->getHeight() != rhs.unit->getHeight();
+  if (heightsDiffer) {
+    return lhs.unit->getHeight() > rhs.unit->getHeight();
+  }
+  if (lhs.pressureDelta != rhs.pressureDelta) {
+    return lhs.pressureDelta < rhs.pressureDelta;
+  }
+  return lhs.unit->getOriginalIndex() < rhs.unit->getOriginalIndex();
+}
+
+/// Build a deterministic top-down list schedule.  All tracker state remains
+/// private until the complete order has been found, so any unsupported model
+/// entry or tracker failure leaves the input region byte-for-byte unchanged.
+static FailureOr<SmallVector<Operation *>>
+buildSchedule(VPTOSchedDAG &dag, const VPTOSchedModel &model) {
+  VPTOSchedBoundary boundary(dag, model, VPTOSchedDirection::Top);
+  VPTOResourceTracker &resources = boundary.getResourceTracker();
+  VPTORegPressureTracker &pressure = boundary.getPressureTracker();
+  VPTOHazardRecognizer &hazards = boundary.getHazardRecognizer();
+  DenseMap<VPTOSUnit *, unsigned> issueCycles;
+  SmallVector<Operation *> order;
+  unsigned currentCycle = 0;
+  SmallVector<int64_t> entryPressure(pressure.getCurrent());
+  const size_t unitCount = dag.getUnits().size();
+
+  for (size_t scheduledCount = 0; scheduledCount < unitCount;
+       ++scheduledCount) {
+    if (boundary.getAvailable().empty()) {
+      if (!boundary.advanceToNextPendingCycle()) {
+        return failure();
+      }
+      currentCycle = std::max(currentCycle, boundary.getCurrentCycle());
+    }
+
+    ScheduledCandidate best;
+    for (VPTOSUnit *unit : boundary.getAvailable()) {
+      unsigned dependencyCycle = currentCycle;
+      bool missingPredecessor = false;
+      for (VPTOSchedEdge *edge : unit->getPredecessors()) {
+        if (!edge->isMust()) {
+          continue;
+        }
+        auto found = issueCycles.find(edge->getPredecessor());
+        if (found == issueCycles.end()) {
+          missingPredecessor = true;
+          break;
+        }
+        dependencyCycle =
+            std::max(dependencyCycle, found->second + edge->getLatency());
+      }
+      if (missingPredecessor) {
+        continue;
+      }
+
+      VPTOResourceEvaluation resource =
+          resources.evaluate(*unit, dependencyCycle);
+      if (!resource.legal) {
+        return failure();
+      }
+      VPTOHazardResult hazard = hazards.check(
+          *unit, VPTOSchedDirection::Top, resource.earliestCycle);
+      if (!hazard.legal) {
+        return failure();
+      }
+      unsigned cycle = std::max(resource.earliestCycle, hazard.earliestCycle);
+      resource = resources.evaluate(*unit, cycle);
+      if (!resource.legal || resource.earliestCycle != cycle) {
+        continue;
+      }
+
+      VPTORegPressureEvaluation pressureEval = pressure.evaluate(*unit);
+      unsigned excess = 0;
+      for (int64_t value : pressureEval.projectedExcess) {
+        excess += static_cast<unsigned>(std::max<int64_t>(0, value));
+      }
+      // Keep the latency-driven lookahead bounded.  A5 vector kernels often
+      // enter a region with several loop-carried accumulators; allowing at
+      // most three additional transient vector values exposes independent
+      // work without turning every load in the region into one long live
+      // range.  This is a scheduling window, not a physical register limit.
+      const bool hasPressureValues =
+          !pressureEval.projected.empty() && !entryPressure.empty();
+      if (hasPressureValues) {
+        const int64_t transientLimit = entryPressure.front() + 3;
+        excess += static_cast<unsigned>(std::max<int64_t>(
+            0, pressureEval.projected.front() - transientLimit));
+      }
+      ScheduledCandidate candidate{unit, cycle, excess,
+                                   pressureEval.weightedDelta};
+      if (isBetterCandidate(candidate, best)) {
+        best = candidate;
+      }
+    }
+    if (!best.unit) {
+      return failure();
+    }
+
+    const bool trackerCommitFailed = failed(resources.commit(*best.unit, best.cycle)) ||
+                                     failed(pressure.commit(*best.unit));
+    if (trackerCommitFailed) {
+      return failure();
+    }
+    hazards.commit(*best.unit, VPTOSchedDirection::Top, best.cycle);
+    if (failed(boundary.commit(*best.unit))) {
+      return failure();
+    }
+    issueCycles[best.unit] = best.cycle;
+    currentCycle = best.cycle;
+    order.push_back(best.unit->getOperation());
+  }
+  return order;
+}
+
+static LogicalResult scheduleFunction(func::FuncOp func,
+                                      const VPTOSchedModel &model,
+                                      llvm::raw_ostream &os) {
+  SmallVector<Operation *> vecScopes;
+  func.walk([&](Operation *op) {
+    if (isa<VecScopeOp, StrictVecScopeOp>(op)) {
+      vecScopes.push_back(op);
+    }
+  });
+
+  std::function<LogicalResult(Region &)> scheduleRegion =
+      [&](Region &parentRegion) -> LogicalResult {
+    for (Block &block : parentRegion) {
+      VPTOSchedRegionBuilder regionBuilder;
+      SmallVector<VPTOSchedRegion> regions = regionBuilder.build(block);
+      for (const VPTOSchedRegion &region : regions) {
+        VPTOSchedDAGBuilder dagBuilder(&model);
+        FailureOr<std::unique_ptr<VPTOSchedDAG>> dag = dagBuilder.build(region);
+        if (failed(dag)) {
+          os << "vpto-scheduler: region=" << region.index
+             << " fallback=dag-cycle\n";
+          continue;
+        }
+        FailureOr<SmallVector<Operation *>> order =
+            buildSchedule(**dag, model);
+        if (failed(order)) {
+          os << "vpto-scheduler: region=" << region.index
+             << " fallback=list-scheduler-failed\n";
+          continue;
+        }
+        Operation *anchor = region.followingBoundary;
+        for (Operation *op : *order) {
+          if (anchor) {
+            op->moveBefore(anchor);
+          } else {
+            op->moveBefore(region.block, region.block->end());
+          }
+        }
+      }
+      for (Operation &op : llvm::make_early_inc_range(block)) {
+        if (isa<VecScopeOp, StrictVecScopeOp>(op)) {
+          continue;
+        }
+        for (Region &nestedRegion : op.getRegions()) {
+          if (failed(scheduleRegion(nestedRegion))) {
+            return failure();
+          }
+        }
+      }
+    }
+    return success();
+  };
+
+  for (Operation *vecScope : vecScopes) {
+    if (failed(scheduleRegion(vecScope->getRegion(0)))) {
+      return failure();
+    }
+  }
+  return success();
 }
 
 static void analyzeFunction(func::FuncOp func, llvm::raw_ostream &os,
                             const VPTOSchedModel &model, StringRef mode) {
   SmallVector<Operation *> vecScopes;
   func.walk([&](Operation *op) {
-    if (isa<VecScopeOp, StrictVecScopeOp>(op))
+    if (isa<VecScopeOp, StrictVecScopeOp>(op)) {
       vecScopes.push_back(op);
+    }
   });
-  if (vecScopes.empty())
+  if (vecScopes.empty()) {
     return;
+  }
 
   const VPTOSchedMachineModel &machine = model.getMachineModel();
   os << "vpto-scheduler: function=" << func.getSymName() << " mode=" << mode
@@ -268,12 +464,24 @@ struct VPTOSchedulerPass
     }
     if (auto kernelKind = getOperation()->getAttrOfType<FunctionKernelKindAttr>(
             FunctionKernelKindAttr::name);
-        kernelKind && kernelKind.getKernelKind() != FunctionKernelKind::Vector)
+        kernelKind && kernelKind.getKernelKind() != FunctionKernelKind::Vector) {
       return;
+    }
 
     VPTOGenericA5SchedModel model;
     std::string report;
     llvm::raw_string_ostream os(report);
+    if (mode == "on") {
+      WalkResult result = getOperation().walk([&](func::FuncOp func) {
+        if (failed(scheduleFunction(func, model, os))) {
+          return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+      });
+      if (result.wasInterrupted()) {
+        return signalPassFailure();
+      }
+    }
     getOperation().walk(
         [&](func::FuncOp func) { analyzeFunction(func, os, model, mode); });
     os.flush();

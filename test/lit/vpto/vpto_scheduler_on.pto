@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s '-pto-vpto-scheduler=mode=on' > %t.once 2> /dev/null
+// RUN: pto-test-opt %t.once '-pto-vpto-scheduler=mode=on' > %t.twice 2> /dev/null
+// RUN: diff %t.once %t.twice
+// RUN: FileCheck %s < %t.once
+
+// CHECK-LABEL: func.func @interleave_independent_chains
+// CHECK: %[[MASK:.*]] = pto.pset_b32
+// CHECK-NEXT: %[[A0:.*]] = pto.vadd %arg0, %arg1, %[[MASK]]
+// CHECK-NEXT: %[[B0:.*]] = pto.vadd %arg2, %arg3, %[[MASK]]
+// CHECK-NEXT: %{{.*}} = pto.vadd %[[A0]], %arg1, %[[MASK]]
+// CHECK-NEXT: %{{.*}} = pto.vadd %[[B0]], %arg3, %[[MASK]]
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @interleave_independent_chains(
+      %a: !pto.vreg<64xf32>, %b: !pto.vreg<64xf32>,
+      %c: !pto.vreg<64xf32>, %d: !pto.vreg<64xf32>) {
+    pto.vecscope {
+      %mask = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+      %a0 = pto.vadd %a, %b, %mask : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+      %a1 = pto.vadd %a0, %b, %mask : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+      %b0 = pto.vadd %c, %d, %mask : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+      %b1 = pto.vadd %b0, %d, %mask : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+    }
+    return
+  }
+}

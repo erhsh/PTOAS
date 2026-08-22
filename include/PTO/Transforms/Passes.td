@@ -777,12 +777,13 @@ def PTOUnrollSIMTFor : Pass<"pto-unroll-simt-for", "func::FuncOp"> {
   let description = [{
     Walks functions with the `pto.simt_entry` attribute or inline
     `pto.section.simt` regions and fully unrolls `scf.for` loops that carry the
-    `{pto.unroll = "full"}` attribute. Annotated loops outside an inline SIMT
+    `{pto.unroll = "full"}` or `{pto.unroll = "auto"}` attribute. Annotated loops outside an inline SIMT
     section in an ordinary function are left unchanged.
 
     Only loops with constant lower bound, upper bound, and positive step are
-    unrolled.  The annotation is opt-in: loops without the attribute are
-    left unchanged regardless of trip count.
+    unrolled. `full` is mandatory while `auto` is gated by structural,
+    function-wide code-growth, and pressure budgets. The annotation is opt-in:
+    loops without the attribute are left unchanged regardless of trip count.
 
     Full unrolling enables subsequent canonicalize/sccp/cse to constant-fold
     induction-variable-dependent conditionals (e.g. `scf.if i < 10`), eliminating
@@ -792,6 +793,16 @@ def PTOUnrollSIMTFor : Pass<"pto-unroll-simt-for", "func::FuncOp"> {
     lowering) so that the unrolled structured control flow can be canonicalized.
   }];
   let constructor = "mlir::pto::createPTOUnrollSIMTForPass()";
+  let options = [
+    Option<"mode", "mode", "std::string", "\"on\"",
+           "Auto-unroll mode: off, analyze, or on; full hints are always honored">,
+    Option<"maxAutoTripCount", "max-auto-trip-count", "int64_t", "256",
+           "Safety ceiling for an auto-unroll candidate trip count">,
+    Option<"maxAutoExpandedOps", "max-auto-expanded-ops", "int64_t", "8192",
+           "Maximum estimated operations after auto unrolling">,
+    Option<"maxAutoPressure", "max-auto-pressure", "int64_t", "256",
+           "Maximum structural live-value and memory pressure estimate">
+  ];
   let dependentDialects = [
     "mlir::func::FuncDialect",
     "mlir::scf::SCFDialect",
@@ -1218,7 +1229,7 @@ def PTOValidateVPTOEmissionIR
 }
 
 def VPTOScheduler : Pass<"pto-vpto-scheduler", "ModuleOp"> {
-  let summary = "Analyze emission-ready VPTO scheduling regions";
+  let summary = "Analyze or schedule emission-ready VPTO regions";
   let description = [{
     Builds block-local scheduling regions, typed dependency DAGs, target
     resource timelines, and register-pressure summaries for operations inside
@@ -1229,7 +1240,8 @@ def VPTOScheduler : Pass<"pto-vpto-scheduler", "ModuleOp"> {
     module must declare `pto.target_arch = "a5"` directly or inherit it from
     an enclosing module; a missing or different target is rejected.
     `off` is an exact no-op. `analyze` emits a deterministic report without
-    mutating IR.
+    mutating IR. `on` applies a deterministic dependency-, latency-, resource-,
+    and pressure-aware top-down list schedule.
   }];
   let constructor = "mlir::pto::createVPTOSchedulerPass()";
   let options = [

@@ -45,6 +45,11 @@ enum SchedClassID : unsigned {
   CubeClass,
   ControlClass,
   UnknownClass,
+  VectorLoadClass,
+  VectorConvertClass,
+  VectorFMAClass,
+  VectorReduceClass,
+  VectorStoreClass,
 };
 
 static std::optional<SchedClassID> getSchedClassForPipe(PIPE pipe) {
@@ -77,7 +82,7 @@ static std::optional<SchedClassID> getSchedClassForPipe(PIPE pipe) {
 
 VPTOGenericA5SchedModel::VPTOGenericA5SchedModel() {
   machine.target = "a5";
-  machine.version = "generic-a5-v1";
+  machine.version = "generic-a5-v2";
   machine.issueWidth = 1;
   machine.microOpBufferSize = 0;
 
@@ -105,6 +110,16 @@ VPTOGenericA5SchedModel::VPTOGenericA5SchedModel() {
       {CubeClass, "cube", true, 1, 4, {{CubeResource, 0, 1, 1}}, {}},
       {ControlClass, "control", true, 1, 1, {{ControlResource, 0, 1, 1}}, {}},
       {UnknownClass, "unknown", false, 1, 1, {{UnknownResource, 0, 1, 1}}, {}},
+      {VectorLoadClass, "vector-load", true, 1, 2,
+       {{VectorResource, 0, 1, 1}}, {}},
+      {VectorConvertClass, "vector-convert", true, 1, 2,
+       {{VectorResource, 0, 1, 1}}, {}},
+      {VectorFMAClass, "vector-fma", true, 1, 4,
+       {{VectorResource, 0, 1, 1}}, {}},
+      {VectorReduceClass, "vector-reduce", true, 1, 8,
+       {{VectorResource, 0, 1, 1}}, {}},
+      {VectorStoreClass, "vector-store", true, 1, 1,
+       {{VectorResource, 0, 1, 1}}, {}},
   };
 }
 
@@ -113,6 +128,21 @@ VPTOGenericA5SchedModel::getSchedClass(Operation *op) const {
   VPTOSchedulingSemantics semantics = getVPTOSchedulingSemantics(op);
   if (!op || semantics.schedulingClass == VPTOSchedulingClass::Structural)
     return schedClasses[StructuralClass];
+  if (isa<VldsOp, Vldsx2Op>(op)) {
+    return schedClasses[VectorLoadClass];
+  }
+  if (isa<VcvtOp>(op)) {
+    return schedClasses[VectorConvertClass];
+  }
+  if (isa<VmulaOp>(op)) {
+    return schedClasses[VectorFMAClass];
+  }
+  if (isa<VcaddOp>(op)) {
+    return schedClasses[VectorReduceClass];
+  }
+  if (isa<VstsOp>(op)) {
+    return schedClasses[VectorStoreClass];
+  }
   if (auto pipeOp = dyn_cast<OpPipeInterface>(op))
     if (std::optional<SchedClassID> schedClass =
             getSchedClassForPipe(pipeOp.getPipe()))
