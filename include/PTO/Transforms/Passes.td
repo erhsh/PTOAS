@@ -1411,6 +1411,23 @@ def VPTOGuardedLICM : Pass<"vpto-guarded-licm", "func::FuncOp"> {
                            "mlir::scf::SCFDialect"];
 }
 
+def PTOHoistCommonScalarExpressions
+    : Pass<"pto-hoist-common-scalar-expressions", "func::FuncOp"> {
+  let summary = "Hoist profitable scalar expressions shared across structured branches";
+  let description = [{
+    Complements dominance-based CSE by finding structurally equivalent, pure
+    scalar integer/index arithmetic in nested scf.if regions and materializing
+    one copy at their nearest common dominating block. The pass never crosses
+    loops, SIMT scopes, or other region-bearing execution boundaries, rejects
+    mutually-exclusive-only occurrences, and requires a conservative weighted
+    reduction in arithmetic before rewriting.
+  }];
+  let constructor = "mlir::pto::createPTOHoistCommonScalarExpressionsPass()";
+  let dependentDialects = ["mlir::arith::ArithDialect",
+                           "mlir::func::FuncDialect",
+                           "mlir::scf::SCFDialect"];
+}
+
 def PTOPrintAddressAnalysis
     : Pass<"pto-print-address-analysis", "func::FuncOp"> {
   let summary = "Print cached PTO value-evolution and VPTO address facts";
