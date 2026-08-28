@@ -777,6 +777,10 @@ static void prepareVPTOForEmission(PassManager &pm) {
   kernelModulePM.addPass(createCanonicalizerPass());
   kernelModulePM.addPass(createCSEPass());
   kernelModulePM.addNestedPass<func::FuncOp>(
+      pto::createPTOHoistCommonScalarExpressionsPass());
+  kernelModulePM.addPass(createCanonicalizerPass());
+  kernelModulePM.addPass(createCSEPass());
+  kernelModulePM.addNestedPass<func::FuncOp>(
       pto::createPTOAnalyzeSIMTPersistentFragmentPass());
   kernelModulePM.addNestedPass<func::FuncOp>(
       pto::createPTOMaterializeSIMTPersistentFragmentPass());

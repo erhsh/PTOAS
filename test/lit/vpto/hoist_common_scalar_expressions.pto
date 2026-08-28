@@ -1,0 +1,568 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s -pto-hoist-common-scalar-expressions | FileCheck %s
+
+module {
+  func.func @independent_optional_branches(%arg: i32, %first: i1, %second: i1)
+      -> i64 {
+    %left = scf.if %first -> i64 {
+      %c4 = arith.constant 4 : i32
+      %add = arith.addi %arg, %c4 : i32
+      %shift = arith.shrsi %add, %c4 : i32
+      %wide = arith.extsi %shift : i32 to i64
+      scf.yield %wide : i64
+    } else {
+      %zero = arith.constant 0 : i64
+      scf.yield %zero : i64
+    }
+    %right = scf.if %second -> i64 {
+      %c4 = arith.constant 4 : i32
+      %add = arith.addi %arg, %c4 : i32
+      %shift = arith.shrsi %add, %c4 : i32
+      %wide = arith.extsi %shift : i32 to i64
+      scf.yield %wide : i64
+    } else {
+      %zero = arith.constant 0 : i64
+      scf.yield %zero : i64
+    }
+    %sum = arith.addi %left, %right : i64
+    return %sum : i64
+  }
+
+  func.func @independent_shared_subdag(%arg: i32, %first: i1, %second: i1) -> i64 {
+    %left = scf.if %first -> i64 {
+      %c2 = arith.constant 2 : i32
+      %base = arith.muli %arg, %c2 : i32
+      %sum = arith.addi %base, %base : i32
+      %wide = arith.extsi %sum : i32 to i64
+      scf.yield %wide : i64
+    } else {
+      %zero = arith.constant 0 : i64
+      scf.yield %zero : i64
+    }
+    %right = scf.if %second -> i64 {
+      %c2 = arith.constant 2 : i32
+      %base = arith.muli %arg, %c2 : i32
+      %sum = arith.addi %base, %base : i32
+      %wide = arith.extsi %sum : i32 to i64
+      scf.yield %wide : i64
+    } else {
+      %zero = arith.constant 0 : i64
+      scf.yield %zero : i64
+    }
+    %result = arith.addi %left, %right : i64
+    return %result : i64
+  }
+
+  func.func @exhaustive_repeated_branches(%arg: i32, %condition: i1) -> i64 {
+    %false = arith.constant false
+    %not = arith.cmpi eq, %condition, %false : i1
+    %first = scf.if %condition -> i64 {
+      %c4 = arith.constant 4 : i32
+      %add = arith.addi %arg, %c4 : i32
+      %shift = arith.shrsi %add, %c4 : i32
+      %wide = arith.extsi %shift : i32 to i64
+      scf.yield %wide : i64
+    } else {
+      %zero = arith.constant 0 : i64
+      scf.yield %zero : i64
+    }
+    %second = scf.if %condition -> i64 {
+      %c4 = arith.constant 4 : i32
+      %add = arith.addi %arg, %c4 : i32
+      %shift = arith.shrsi %add, %c4 : i32
+      %wide = arith.extsi %shift : i32 to i64
+      scf.yield %wide : i64
+    } else {
+      %zero = arith.constant 0 : i64
+      scf.yield %zero : i64
+    }
+    %third = scf.if %not -> i64 {
+      %c4 = arith.constant 4 : i32
+      %add = arith.addi %arg, %c4 : i32
+      %shift = arith.shrsi %add, %c4 : i32
+      %wide = arith.extsi %shift : i32 to i64
+      scf.yield %wide : i64
+    } else {
+      %zero = arith.constant 0 : i64
+      scf.yield %zero : i64
+    }
+    %fourth = scf.if %not -> i64 {
+      %c4 = arith.constant 4 : i32
+      %add = arith.addi %arg, %c4 : i32
+      %shift = arith.shrsi %add, %c4 : i32
+      %wide = arith.extsi %shift : i32 to i64
+      scf.yield %wide : i64
+    } else {
+      %zero = arith.constant 0 : i64
+      scf.yield %zero : i64
+    }
+    %sum0 = arith.addi %first, %second : i64
+    %sum1 = arith.addi %third, %fourth : i64
+    %result = arith.addi %sum0, %sum1 : i64
+    return %result : i64
+  }
+
+  func.func @bounded_live_range_with_expected_saving(
+      %arg: i32, %p0: i1, %p1: i1, %p2: i1, %p3: i1, %p4: i1,
+      %p5: i1, %p6: i1) -> i64 {
+    %wideArg = arith.extsi %arg : i32 to i64
+    %c0 = arith.constant 0 : i64
+    %c4 = arith.constant 4 : i64
+    %r0 = scf.if %p0 -> i64 {
+      %inner = scf.if %p1 -> i64 {
+        %value = arith.divsi %wideArg, %c4 : i64
+        scf.yield %value : i64
+      } else {
+        scf.yield %c0 : i64
+      }
+      scf.yield %inner : i64
+    } else {
+      scf.yield %c0 : i64
+    }
+    %r1 = scf.if %p0 -> i64 {
+      %inner = scf.if %p2 -> i64 {
+        %value = arith.divsi %wideArg, %c4 : i64
+        scf.yield %value : i64
+      } else {
+        scf.yield %c0 : i64
+      }
+      scf.yield %inner : i64
+    } else {
+      scf.yield %c0 : i64
+    }
+    %r2 = scf.if %p1 -> i64 {
+      %inner = scf.if %p2 -> i64 {
+        %value = arith.divsi %wideArg, %c4 : i64
+        scf.yield %value : i64
+      } else {
+        scf.yield %c0 : i64
+      }
+      scf.yield %inner : i64
+    } else {
+      scf.yield %c0 : i64
+    }
+    %r3 = scf.if %p3 -> i64 {
+      %inner = scf.if %p4 -> i64 {
+        %value = arith.divsi %wideArg, %c4 : i64
+        scf.yield %value : i64
+      } else {
+        scf.yield %c0 : i64
+      }
+      scf.yield %inner : i64
+    } else {
+      scf.yield %c0 : i64
+    }
+    %r4 = scf.if %p3 -> i64 {
+      %inner = scf.if %p5 -> i64 {
+        %value = arith.divsi %wideArg, %c4 : i64
+        scf.yield %value : i64
+      } else {
+        scf.yield %c0 : i64
+      }
+      scf.yield %inner : i64
+    } else {
+      scf.yield %c0 : i64
+    }
+    %r5 = scf.if %p4 -> i64 {
+      %middle = scf.if %p5 -> i64 {
+        %inner = scf.if %p6 -> i64 {
+          %value = arith.divsi %wideArg, %c4 : i64
+          scf.yield %value : i64
+        } else {
+          scf.yield %c0 : i64
+        }
+        scf.yield %inner : i64
+      } else {
+        scf.yield %c0 : i64
+      }
+      scf.yield %middle : i64
+    } else {
+      scf.yield %c0 : i64
+    }
+    %sum0 = arith.addi %r0, %r1 : i64
+    %sum1 = arith.addi %r2, %r3 : i64
+    %sum2 = arith.addi %r4, %r5 : i64
+    %sum3 = arith.addi %sum0, %sum1 : i64
+    %result = arith.addi %sum3, %sum2 : i64
+    return %result : i64
+  }
+
+  func.func @long_live_range_is_not_profitable(%arg: i32, %condition: i1)
+      -> i64 {
+    %false = arith.constant false
+    %not = arith.cmpi eq, %condition, %false : i1
+    %first = scf.if %condition -> i64 {
+      %c4 = arith.constant 4 : i32
+      %add = arith.addi %arg, %c4 : i32
+      %shift = arith.shrsi %add, %c4 : i32
+      %wide = arith.extsi %shift : i32 to i64
+      scf.yield %wide : i64
+    } else {
+      %zero = arith.constant 0 : i64
+      scf.yield %zero : i64
+    }
+    %second = scf.if %condition -> i64 {
+      %c4 = arith.constant 4 : i32
+      %add = arith.addi %arg, %c4 : i32
+      %shift = arith.shrsi %add, %c4 : i32
+      %wide = arith.extsi %shift : i32 to i64
+      scf.yield %wide : i64
+    } else {
+      %zero = arith.constant 0 : i64
+      scf.yield %zero : i64
+    }
+    scf.if %condition {
+      scf.yield
+    }
+    scf.if %not {
+      scf.yield
+    }
+    scf.if %condition {
+      scf.yield
+    }
+    scf.if %not {
+      scf.yield
+    }
+    scf.if %condition {
+      scf.yield
+    }
+    %third = scf.if %not -> i64 {
+      %c4 = arith.constant 4 : i32
+      %add = arith.addi %arg, %c4 : i32
+      %shift = arith.shrsi %add, %c4 : i32
+      %wide = arith.extsi %shift : i32 to i64
+      scf.yield %wide : i64
+    } else {
+      %zero = arith.constant 0 : i64
+      scf.yield %zero : i64
+    }
+    %fourth = scf.if %not -> i64 {
+      %c4 = arith.constant 4 : i32
+      %add = arith.addi %arg, %c4 : i32
+      %shift = arith.shrsi %add, %c4 : i32
+      %wide = arith.extsi %shift : i32 to i64
+      scf.yield %wide : i64
+    } else {
+      %zero = arith.constant 0 : i64
+      scf.yield %zero : i64
+    }
+    %sum0 = arith.addi %first, %second : i64
+    %sum1 = arith.addi %third, %fourth : i64
+    %result = arith.addi %sum0, %sum1 : i64
+    return %result : i64
+  }
+
+  func.func @mutually_exclusive_branches(%arg: i32, %condition: i1) -> i64 {
+    %result = scf.if %condition -> i64 {
+      %c4 = arith.constant 4 : i32
+      %add = arith.addi %arg, %c4 : i32
+      %shift = arith.shrsi %add, %c4 : i32
+      %wide = arith.extsi %shift : i32 to i64
+      scf.yield %wide : i64
+    } else {
+      %c4 = arith.constant 4 : i32
+      %add = arith.addi %arg, %c4 : i32
+      %shift = arith.shrsi %add, %c4 : i32
+      %wide = arith.extsi %shift : i32 to i64
+      scf.yield %wide : i64
+    }
+    return %result : i64
+  }
+
+  func.func @sequential_complements_are_not_hoisted(
+      %arg: i32, %condition: i1) -> i64 {
+    %false = arith.constant false
+    %not = arith.cmpi eq, %condition, %false : i1
+    %left = scf.if %condition -> i64 {
+      %c4 = arith.constant 4 : i32
+      %value = arith.divsi %arg, %c4 : i32
+      %wide = arith.extsi %value : i32 to i64
+      scf.yield %wide : i64
+    } else {
+      %zero = arith.constant 0 : i64
+      scf.yield %zero : i64
+    }
+    %right = scf.if %not -> i64 {
+      %c4 = arith.constant 4 : i32
+      %value = arith.divsi %arg, %c4 : i32
+      %wide = arith.extsi %value : i32 to i64
+      scf.yield %wide : i64
+    } else {
+      %zero = arith.constant 0 : i64
+      scf.yield %zero : i64
+    }
+    %result = arith.addi %left, %right : i64
+    return %result : i64
+  }
+
+  func.func @does_not_cross_loops(%arg: i32, %condition: i1) -> i64 {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %loop = scf.for %i = %c0 to %c1 step %c1 iter_args(%acc = %arg) -> i32 {
+      %value = scf.if %condition -> i32 {
+        %c4 = arith.constant 4 : i32
+        %add = arith.addi %arg, %c4 : i32
+        %shift = arith.shrsi %add, %c4 : i32
+        scf.yield %shift : i32
+      } else {
+        scf.yield %acc : i32
+      }
+      scf.yield %value : i32
+    }
+    %outside = scf.if %condition -> i32 {
+      %c4 = arith.constant 4 : i32
+      %add = arith.addi %arg, %c4 : i32
+      %shift = arith.shrsi %add, %c4 : i32
+      scf.yield %shift : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    %wideLoop = arith.extsi %loop : i32 to i64
+    %wideOutside = arith.extsi %outside : i32 to i64
+    %sum = arith.addi %wideLoop, %wideOutside : i64
+    return %sum : i64
+  }
+
+  func.func @dynamic_divisor_is_not_speculated(%arg: i32, %divisor: i32,
+                                                %first: i1, %second: i1)
+      -> i32 {
+    %left = scf.if %first -> i32 {
+      %value = arith.divsi %arg, %divisor : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    %right = scf.if %second -> i32 {
+      %value = arith.divsi %arg, %divisor : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    %sum = arith.addi %left, %right : i32
+    return %sum : i32
+  }
+
+  func.func @xori_exhaustive_repetition(%arg: i32, %condition: i1) -> i32 {
+    %true = arith.constant true
+    %not = arith.xori %condition, %true : i1
+    %first = scf.if %condition -> i32 {
+      %c4 = arith.constant 4 : i32
+      %value = arith.divsi %arg, %c4 : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    %second = scf.if %condition -> i32 {
+      %c4 = arith.constant 4 : i32
+      %value = arith.divsi %arg, %c4 : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    %third = scf.if %not -> i32 {
+      %c4 = arith.constant 4 : i32
+      %value = arith.divsi %arg, %c4 : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    %fourth = scf.if %not -> i32 {
+      %c4 = arith.constant 4 : i32
+      %value = arith.divsi %arg, %c4 : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    %sum0 = arith.addi %first, %second : i32
+    %sum1 = arith.addi %third, %fourth : i32
+    %result = arith.addi %sum0, %sum1 : i32
+    return %result : i32
+  }
+
+  func.func @same_guard_repetition_is_guarded(%arg: i32, %condition: i1)
+      -> i32 {
+    %first = scf.if %condition -> i32 {
+      %c4 = arith.constant 4 : i32
+      %value = arith.divsi %arg, %c4 : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    %second = scf.if %condition -> i32 {
+      %c4 = arith.constant 4 : i32
+      %value = arith.divsi %arg, %c4 : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    %result = arith.addi %first, %second : i32
+    return %result : i32
+  }
+
+  func.func @constant_divisor_is_safe_but_unprofitable(
+      %arg: i32, %first: i1, %second: i1) -> i32 {
+    %left = scf.if %first -> i32 {
+      %c4 = arith.constant 4 : i32
+      %value = arith.divsi %arg, %c4 : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    %right = scf.if %second -> i32 {
+      %c4 = arith.constant 4 : i32
+      %value = arith.divsi %arg, %c4 : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    %sum = arith.addi %left, %right : i32
+    return %sum : i32
+  }
+
+  func.func @signed_remainder_minus_one_is_not_speculated() -> i32 {
+    %false = arith.constant false
+    %min = arith.constant -2147483648 : i32
+    %minusOne = arith.constant -1 : i32
+    %left = scf.if %false -> i32 {
+      %value = arith.remsi %min, %minusOne : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %min : i32
+    }
+    %right = scf.if %false -> i32 {
+      %value = arith.remsi %min, %minusOne : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %min : i32
+    }
+    %sum = arith.addi %left, %right : i32
+    return %sum : i32
+  }
+
+  func.func @cheap_add_is_not_speculated(%arg: i32, %first: i1,
+                                          %second: i1) -> i32 {
+    %c1 = arith.constant 1 : i32
+    %left = scf.if %first -> i32 {
+      %value = arith.addi %arg, %c1 : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    %right = scf.if %second -> i32 {
+      %value = arith.addi %arg, %c1 : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    %sum = arith.addi %left, %right : i32
+    return %sum : i32
+  }
+}
+
+// CHECK-LABEL: func.func @independent_optional_branches
+// CHECK-SAME: (%[[ARG:[a-zA-Z0-9_]+]]: i32
+// CHECK: scf.if
+// CHECK: arith.addi %[[ARG]]
+// CHECK: arith.shrsi
+// CHECK: scf.if
+// CHECK: arith.addi %[[ARG]]
+// CHECK: arith.shrsi
+
+// CHECK-LABEL: func.func @independent_shared_subdag
+// CHECK-SAME: (%[[ARG:[a-zA-Z0-9_]+]]: i32
+// CHECK: scf.if
+// CHECK: arith.muli %[[ARG]]
+// CHECK: scf.if
+// CHECK: arith.muli %[[ARG]]
+
+// CHECK-LABEL: func.func @exhaustive_repeated_branches
+// CHECK-SAME: (%[[ARG:[a-zA-Z0-9_]+]]: i32
+// CHECK: %[[C4:.*]] = arith.constant 4 : i32
+// CHECK: %[[ADD:.*]] = arith.addi %[[ARG]], %[[C4]] : i32
+// CHECK: %[[SHIFT:.*]] = arith.shrsi %[[ADD]], %[[C4]] : i32
+// CHECK: %[[WIDE:.*]] = arith.extsi %[[SHIFT]] : i32 to i64
+// CHECK-NOT: arith.addi %[[ARG]]
+// CHECK-COUNT-4: scf.yield %[[WIDE]] : i64
+
+// CHECK-LABEL: func.func @bounded_live_range_with_expected_saving
+// CHECK-SAME: (%[[ARG:[a-zA-Z0-9_]+]]: i32
+// CHECK: %[[WIDE:.*]] = arith.extsi %[[ARG]] : i32 to i64
+// CHECK: %[[C4:.*]] = arith.constant 4 : i64
+// CHECK: %[[DIV:.*]] = arith.divsi %[[WIDE]], %[[C4]] : i64
+// CHECK-NOT: arith.divsi
+// CHECK-COUNT-6: scf.yield %[[DIV]] : i64
+
+// CHECK-LABEL: func.func @long_live_range_is_not_profitable
+// CHECK-SAME: (%[[ARG:[a-zA-Z0-9_]+]]: i32
+// CHECK-COUNT-4: arith.shrsi
+
+// CHECK-LABEL: func.func @mutually_exclusive_branches
+// CHECK-SAME: (%[[ARG:[a-zA-Z0-9_]+]]: i32
+// CHECK: scf.if
+// CHECK: arith.addi %[[ARG]]
+// CHECK: arith.shrsi
+// CHECK: } else {
+// CHECK: arith.addi %[[ARG]]
+// CHECK: arith.shrsi
+
+// CHECK-LABEL: func.func @sequential_complements_are_not_hoisted
+// CHECK-SAME: (%[[ARG:[a-zA-Z0-9_]+]]: i32
+// CHECK-COUNT-2: arith.divsi %[[ARG]]
+
+// CHECK-LABEL: func.func @does_not_cross_loops
+// CHECK-SAME: (%[[ARG:[a-zA-Z0-9_]+]]: i32
+// CHECK: scf.for
+// CHECK: arith.addi %[[ARG]]
+// CHECK: arith.shrsi
+// CHECK: scf.if
+// CHECK: arith.addi %[[ARG]]
+// CHECK: arith.shrsi
+
+// CHECK-LABEL: func.func @dynamic_divisor_is_not_speculated
+// CHECK-SAME: (%[[ARG:[a-zA-Z0-9_]+]]: i32, %[[DIVISOR:[a-zA-Z0-9_]+]]: i32
+// CHECK-COUNT-2: arith.divsi %[[ARG]], %[[DIVISOR]]
+
+// CHECK-LABEL: func.func @xori_exhaustive_repetition
+// CHECK-SAME: (%[[ARG:[a-zA-Z0-9_]+]]: i32
+// CHECK: %[[C4:.*]] = arith.constant 4 : i32
+// CHECK: %[[DIV:.*]] = arith.divsi %[[ARG]], %[[C4]] : i32
+// CHECK-NOT: arith.divsi
+// CHECK-COUNT-4: scf.yield %[[DIV]] : i32
+
+// CHECK-LABEL: func.func @same_guard_repetition_is_guarded
+// CHECK-SAME: (%[[ARG:[a-zA-Z0-9_]+]]: i32, %[[CONDITION:[a-zA-Z0-9_]+]]: i1
+// CHECK: %[[GUARDED:.*]] = scf.if %[[CONDITION]] -> (i32) {
+// CHECK: %[[DIV:.*]] = arith.divsi %[[ARG]]
+// CHECK: scf.yield %[[DIV]] : i32
+// CHECK: scf.if %[[CONDITION]]
+// CHECK: scf.yield %[[GUARDED]] : i32
+// CHECK: scf.if %[[CONDITION]]
+// CHECK: scf.yield %[[GUARDED]] : i32
+
+// CHECK-LABEL: func.func @constant_divisor_is_safe_but_unprofitable
+// CHECK-SAME: (%[[ARG:[a-zA-Z0-9_]+]]: i32
+// CHECK-COUNT-2: arith.divsi %[[ARG]]
+
+// CHECK-LABEL: func.func @signed_remainder_minus_one_is_not_speculated
+// CHECK: %[[FALSE:.*]] = arith.constant false
+// CHECK: %[[MIN:.*]] = arith.constant -2147483648 : i32
+// CHECK: %[[MINUS_ONE:.*]] = arith.constant -1 : i32
+// CHECK-NOT: arith.remsi
+// CHECK: scf.if %[[FALSE]]
+// CHECK: arith.remsi %[[MIN]], %[[MINUS_ONE]] : i32
+// CHECK: scf.if %[[FALSE]]
+// CHECK: arith.remsi %[[MIN]], %[[MINUS_ONE]] : i32
+
+// CHECK-LABEL: func.func @cheap_add_is_not_speculated
+// CHECK-SAME: (%[[ARG:[a-zA-Z0-9_]+]]: i32
+// CHECK: scf.if
+// CHECK: arith.addi %[[ARG]]
+// CHECK: scf.if
+// CHECK: arith.addi %[[ARG]]
