@@ -72,8 +72,9 @@ static std::optional<unsigned> getScalarOpWeight(Operation *op) {
     return std::nullopt;
   }
 
-  // Remainder ops are modeled as pure by Arith, but a zero divisor is still
-  // undefined. Require a known-safe divisor before moving division/remainder.
+  // Division and remainder ops are modeled as pure by Arith, but zero divisors
+  // and signed minimum values with a -1 divisor are still undefined. Require a
+  // known-safe divisor before moving these operations.
   if (name == "arith.divsi" || name == "arith.divui" || name == "arith.remsi" ||
       name == "arith.remui") {
     auto constant = op->getOperand(1).getDefiningOp<arith::ConstantOp>();
@@ -82,7 +83,9 @@ static std::optional<unsigned> getScalarOpWeight(Operation *op) {
     if (!value || value.getValue().isZero()) {
       return std::nullopt;
     }
-    if (name == "arith.divsi" && value.getValue().isAllOnes()) {
+    bool isSignedDivisionOrRemainder =
+        name == "arith.divsi" || name == "arith.remsi";
+    if (isSignedDivisionOrRemainder && value.getValue().isAllOnes()) {
       return std::nullopt;
     }
   }

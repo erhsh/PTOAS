@@ -144,6 +144,26 @@ module {
     return %sum : i32
   }
 
+  func.func @signed_remainder_minus_one_is_not_speculated() -> i32 {
+    %false = arith.constant false
+    %min = arith.constant -2147483648 : i32
+    %minusOne = arith.constant -1 : i32
+    %left = scf.if %false -> i32 {
+      %value = arith.remsi %min, %minusOne : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %min : i32
+    }
+    %right = scf.if %false -> i32 {
+      %value = arith.remsi %min, %minusOne : i32
+      scf.yield %value : i32
+    } else {
+      scf.yield %min : i32
+    }
+    %sum = arith.addi %left, %right : i32
+    return %sum : i32
+  }
+
   func.func @cheap_add_is_not_speculated(%arg: i32, %first: i1,
                                           %second: i1) -> i32 {
     %c1 = arith.constant 1 : i32
@@ -220,6 +240,16 @@ module {
 // CHECK: scf.yield %[[DIV]] : i32
 // CHECK-NOT: arith.divsi
 // CHECK: scf.yield %[[DIV]] : i32
+
+// CHECK-LABEL: func.func @signed_remainder_minus_one_is_not_speculated
+// CHECK: %[[FALSE:.*]] = arith.constant false
+// CHECK: %[[MIN:.*]] = arith.constant -2147483648 : i32
+// CHECK: %[[MINUS_ONE:.*]] = arith.constant -1 : i32
+// CHECK-NOT: arith.remsi
+// CHECK: scf.if %[[FALSE]]
+// CHECK: arith.remsi %[[MIN]], %[[MINUS_ONE]] : i32
+// CHECK: scf.if %[[FALSE]]
+// CHECK: arith.remsi %[[MIN]], %[[MINUS_ONE]] : i32
 
 // CHECK-LABEL: func.func @cheap_add_is_not_speculated
 // CHECK-SAME: (%[[ARG:[a-zA-Z0-9_]+]]: i32
