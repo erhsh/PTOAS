@@ -1418,9 +1418,12 @@ def PTOHoistCommonScalarExpressions
     Complements dominance-based CSE by finding structurally equivalent, pure
     scalar integer/index arithmetic in nested scf.if regions and materializing
     one copy at their nearest common dominating block. The pass never crosses
-    loops, SIMT scopes, or other region-bearing execution boundaries, rejects
-    mutually-exclusive-only occurrences, and requires a conservative weighted
-    reduction in arithmetic before rewriting.
+    loops, SIMT scopes, or other region-bearing execution boundaries. It
+    canonicalizes boolean negations when reasoning about mutually-exclusive
+    paths, estimates dynamic work over the controlling predicates, charges
+    speculative execution, and bounds cross-branch scalar live ranges before
+    rewriting. Repeated work under a common dominating predicate may be shared
+    behind that predicate rather than speculated unconditionally.
   }];
   let constructor = "mlir::pto::createPTOHoistCommonScalarExpressionsPass()";
   let dependentDialects = ["mlir::arith::ArithDialect",
